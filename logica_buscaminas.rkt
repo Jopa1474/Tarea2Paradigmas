@@ -45,22 +45,34 @@
 
 ;;Cambiar pista
 
-;; función auxiliar para recorrer una fila
-(define (recorrer-fila fila)
-  (cond((null? fila) '())                ; fin de la fila
-    (else
-     (begin
-       (display (car fila))           ; imprimir valor
-       (display " ")
-       (recorrer-fila (cdr fila))))))
 
-;; función para recorrer la matriz
-(define (recorrer-matriz matriz)
-  (cond((null? matriz) '())               ; fin de la matriz
-    (else
+;; recorrer una fila mostrando posiciones
+(define (recorrer-fila fila fila-idx col-idx)
+  (cond
+    [(null? fila) '()] ; fin de la fila
+    [else
      (begin
-       (recorrer-fila (car matriz))   ; recorrer la primera fila
-       (recorrer-matriz (cdr matriz))))))
+       (display "(")
+       (display fila-idx)
+       (display " , ")
+       (display col-idx)
+       (display ") ")
+       (recorrer-fila (cdr fila) fila-idx (add1 col-idx)))]))
+
+;; recorrer la matriz con posiciones
+(define (recorrer-matriz matriz fila-idx)
+  (cond
+    [(null? matriz) '()] ; fin de la matriz
+    [else
+     (begin
+       (recorrer-fila (car matriz) fila-idx 0) ; arranca en col=0
+       (newline)
+       (recorrer-matriz (cdr matriz) (add1 fila-idx)))]))
+
+
+;;Para ver si las casillas alrededor tienen minas
+
+
 
 ;;casilla N (arriba)
 
@@ -116,4 +128,27 @@
 
 ;;Para verificar si la casilla tiene una mina
 (define(tiene_mina casilla)
-  (equal? (car casilla) #t))
+  (cond((null? casilla) #f)
+  (else(equal? (car casilla) #t))))
+
+;;Casillas alrededor de la actual
+
+(define (alrededor n m filas columnas)
+  (list (N n m)
+        (O n m columnas)
+        (S n m filas)
+        (E n m)
+        (NO n m filas columnas)
+        (SO n m filas columnas)
+        (SE n m filas columnas)
+        (NE n m filas columnas)))
+
+;;Para obtener el numero de minas que hay alrededor
+(define(num_minas_alrededor n m filas columnas)
+  (num_minas_alrededor_aux n m filas columnas (alrededor n m filas columnas)))
+
+(define (num_minas_alrededor_aux n m filas columnas lista_alrededor)
+  (cond((null? lista_alrededor) 0)
+    ((equal? (tiene_mina (car lista_alrededor)) #t) (+ 1 (num_minas_alrededor_aux n m filas columnas (cdr lista_alrededor))))
+       (else(+ 0 (num_minas_alrededor_aux n m filas columnas (cdr lista_alrededor))))))
+
