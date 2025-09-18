@@ -11,10 +11,10 @@
 
 (provide
   ;; construcción
-  crear-tablero            ; (n m) -> matriz de celdas vacías
-  colocar-minas            ; (tablero prob) -> tablero con minas (prob ~ 0.10/0.15/0.20)
-  tablerizar-con-pistas    ; (tablero) -> tablero con 'pista' llenas
-  generar-tablero-nivel    ; (n m nivel) -> tablero final con minas+pistas
+  crear-tablero
+  colocar-minas
+  tablerizar-con-pistas
+  generar-tablero-nivel
 
   ;; helpers
   filas cols
@@ -22,10 +22,10 @@
   vecinos num-minas-alrededor
 
   ;; juego
-  revelar                  ; (tablero abiertas r c) -> (values nuevas-abiertas explotó?)
+  revelar
   flood-reveal
-  alternar-bandera         ; (banderas r c) -> nuevas-banderas
-  gano?                    ; (tablero abiertas) -> #t/#f
+  alternar-bandera
+  gano?
 )
 
 ;; --------------------------
@@ -56,36 +56,38 @@
 (define (buscar tablero r c)
   (list-ref (list-ref tablero r) c))
 
-;; Actualiza una celda reconstruyendo de forma inmutable
+;; Actualización inmutable (sin let)
 (define (actualizar-celda tablero r c nueva-celda)
-  (let loop-f ((i 0) (filas-tablero tablero) (acc '()))
-    (cond
-      ((null? filas-tablero) (reverse acc))
-      (else
-       (define fila (car filas-tablero))
-       (define fila-nueva
-         (if (= i r)
-             (let loop-c ((j 0) (cols-tab fila) (acc2 '()))
-               (cond
-                 ((null? cols-tab) (reverse acc2))
-                 (else
-                  (define cel (car cols-tab))
-                  (loop-c (add1 j) (cdr cols-tab)
-                          (cons (if (= j c) nueva-celda cel) acc2)))))
-             fila))
-       (loop-f (add1 i) (cdr filas-tablero) (cons fila-nueva acc))))))
+  (actualizar-celda-filas tablero r c nueva-celda 0))
+
+(define (actualizar-celda-filas filas-list r c nueva i)
+  (if (null? filas-list)
+      '()
+      (cons (if (= i r)
+                (actualizar-celda-cols (car filas-list) c nueva 0)
+                (car filas-list))
+            (actualizar-celda-filas (cdr filas-list) r c nueva (add1 i)))))
+
+(define (actualizar-celda-cols fila c nueva j)
+  (if (null? fila)
+      '()
+      (cons (if (= j c) nueva (car fila))
+            (actualizar-celda-cols (cdr fila) c nueva (add1 j)))))
 
 ;; --------------------------
-;; Colocar minas aleatoriamente (por probabilidad 0..1)
+;; Colocar minas (sin map)
 ;; --------------------------
 (define (colocar-minas tablero prob)
-  (map (lambda (fila)
-         (map (lambda (celda)
-                (if (< (random) prob)
-                    '(#t 0 #f #f)
-                    celda))
-              fila))
-       tablero))
+  (if (null? tablero)
+      '()
+      (cons (colocar-minas-fila (car tablero) prob)
+            (colocar-minas (cdr tablero) prob))))
+
+(define (colocar-minas-fila fila prob)
+  (if (null? fila)
+      '()
+      (cons (if (< (random) prob) '(#t 0 #f #f) (car fila))
+            (colocar-minas-fila (cdr fila) prob))))
 
 ;; --------------------------
 ;; Vecindad y conteos
@@ -95,47 +97,55 @@
     (-1 -1) (-1  1) ( 1 -1) ( 1  1)))
 
 (define (vecinos tablero r c)
-  (let loop ((ofs offsets) (acc '()))
-    (if (null? ofs)
-        (reverse acc)
-        (let* ((dr (caar ofs)) (dc (cadar ofs))
-               (nr (+ r dr))  (nc (+ c dc)))
-          (loop (cdr ofs)
-                (if (en-rango? tablero nr nc)
-                    (cons (list nr nc) acc)
-                    acc))))))
+  (vecinos-ofs tablero r c offsets))
+
+(define (vecinos-ofs tablero r c ofs)
+  (if (null? ofs)
+      '()
+      (if (en-rango? tablero (+ r (car (car ofs))) (+ c (cadr (car ofs))))
+          (cons (list (+ r (car (car ofs))) (+ c (cadr (car ofs))))
+                (vecinos-ofs tablero r c (cdr ofs)))
+          (vecinos-ofs tablero r c (cdr ofs)))))
 
 (define (tiene-mina? tablero r c)
-  (car (buscar tablero r c))) ; mina? es el car de la celda
+  (car (buscar tablero r c)))
 
 (define (num-minas-alrededor tablero r c)
-  (let loop ((vecs (vecinos tablero r c)) (acc 0))
-    (if (null? vecs) acc
-        (let* ((p (car vecs)) (rr (car p)) (cc (cadr p))
-               (inc (if (tiene-mina? tablero rr cc) 1 0)))
-          (loop (cdr vecs) (+ acc inc))))))
+  (num-minas-alrededor* tablero (vecinos tablero r c)))
+
+(define (num-minas-alrededor* tablero vecs)
+  (if (null? vecs)
+      0
+      (+ (if (tiene-mina? tablero (car (car vecs)) (cadr (car vecs))) 1 0)
+         (num-minas-alrededor* tablero (cdr vecs)))))
 
 ;; --------------------------
-;; Cargar 'pista' (número) en todas las celdas no-mine
+;; Cargar 'pista' en todas las celdas (sin let)
 ;; --------------------------
 (define (tablerizar-con-pistas tablero)
-  (let loop-f ((r 0) (tab tablero))
-    (if (= r (filas tablero))
-        tab
-        (let loop-c ((c 0) (tab2 tab))
-          (if (= c (cols tablero))
-              (loop-f (add1 r) tab2)
-              (let* ((cel (buscar tab2 r c))
-                     (mina? (car cel))
-                     (pista (if mina? 0 (num-minas-alrededor tab2 r c)))
-                     (desc (caddr cel))
-                     (mark (cadddr cel))
-                     (nuevo (list mina? pista desc mark)))
-                (loop-c (add1 c) (actualizar-celda tab2 r c nuevo))))))))
+  (tablerizar-r tablero 0))
+
+(define (tablerizar-r tab r)
+  (if (= r (filas tab))
+      tab
+      (tablerizar-r (tablerizar-c tab r 0) (add1 r))))
+
+(define (tablerizar-c tab r c)
+  (if (= c (cols tab))
+      tab
+      (tablerizar-c
+       (actualizar-celda
+        tab r c
+        (list (car   (buscar tab r c))
+              (if (car (buscar tab r c))
+                  0
+                  (num-minas-alrededor tab r c))
+              (caddr  (buscar tab r c))
+              (cadddr (buscar tab r c))))
+       r (add1 c))))
 
 ;; --------------------------
 ;; Crear tablero por nivel
-;; nivel: 'facil (0.10) | 'medio (0.15) | 'dificil (0.20)
 ;; --------------------------
 (define (nivel->prob nivel)
   (cond ((eq? nivel 'facil)   0.10)
@@ -143,10 +153,11 @@
         (else                 0.20)))
 
 (define (generar-tablero-nivel n m nivel)
-  (tablerizar-con-pistas (colocar-minas (crear-tablero n m) (nivel->prob nivel))))
+  (tablerizar-con-pistas
+   (colocar-minas (crear-tablero n m) (nivel->prob nivel))))
 
 ;; --------------------------
-;; Conjuntos simples de coordenadas (listas sin repeticiones)
+;; Conjuntos simples de coordenadas
 ;; --------------------------
 (define (ig-coord? a b) (and (= (car a) (car b)) (= (cadr a) (cadr b))))
 (define (en-set? p s)
@@ -154,62 +165,61 @@
        (or (ig-coord? p (car s)) (en-set? p (cdr s)))))
 (define (add-set p s) (if (en-set? p s) s (cons p s)))
 (define (del-set p s)
-  (cond ((null? s) '())
-        ((ig-coord? p (car s)) (cdr s))
-        (else (cons (car s) (del-set p (cdr s))))))
+  (if (null? s)
+      '()
+      (if (ig-coord? p (car s))
+          (cdr s)
+          (cons (car s) (del-set p (cdr s))))))
 
 ;; --------------------------
-;; Flood reveal (descubrir zonas de 0 y su frontera)
-;; Retorna nuevo conjunto de "abiertas"
+;; Flood reveal (sin let)
 ;; --------------------------
 (define (flood-reveal tablero abiertas r c)
   (if (en-set? (list r c) abiertas)
       abiertas
-      (let* ((cel (buscar tablero r c))
-             (mina? (car cel))
-             (pista (cadr cel)))
-        (if mina?
-            abiertas
-            (let ((ab1 (add-set (list r c) abiertas)))
-              (if (> pista 0)
-                  ab1
-                  (let loop ((vecs (vecinos tablero r c)) (acc ab1))
-                    (if (null? vecs) acc
-                        (let* ((p (car vecs)) (rr (car p)) (cc (cadr p)))
-                          (loop (cdr vecs) (flood-reveal tablero acc rr cc)))))))))))
+      (if (tiene-mina? tablero r c)
+          abiertas
+          (if (> (cadr (buscar tablero r c)) 0)
+              (add-set (list r c) abiertas)
+              (flood-reveal-vecinos tablero
+                                    (add-set (list r c) abiertas)
+                                    (vecinos tablero r c))))))
+
+(define (flood-reveal-vecinos tablero abiertas vecs)
+  (if (null? vecs)
+      abiertas
+      (flood-reveal-vecinos tablero
+                            (flood-reveal tablero abiertas
+                                          (car (car vecs)) (cadr (car vecs)))
+                            (cdr vecs))))
 
 ;; --------------------------
 ;; Revelar una celda (click izquierdo)
-;; Devuelve (values nuevas-abiertas explotó?)
 ;; --------------------------
 (define (revelar tablero abiertas r c)
-  (let* ((cel (buscar tablero r c))
-         (mina? (car cel)))
-    (if mina?
-        (values abiertas #t)
-        (values (flood-reveal tablero abiertas r c) #f))))
+  (if (tiene-mina? tablero r c)
+      (values abiertas #t)
+      (values (flood-reveal tablero abiertas r c) #f)))
 
 ;; --------------------------
 ;; Alternar bandera (click derecho)
 ;; --------------------------
 (define (alternar-bandera banderas r c)
-  (let ((p (list r c)))
-    (if (en-set? p banderas) (del-set p banderas) (add-set p banderas))))
+  (if (en-set? (list r c) banderas)
+      (del-set (list r c) banderas)
+      (add-set (list r c) banderas)))
 
 ;; --------------------------
-;; ¿Ganó? = todas las celdas sin mina están en 'abiertas'
+;; ¿Ganó?
 ;; --------------------------
 (define (gano? tablero abiertas)
-  (let loop-f ((r 0))
-    (cond
-      ((= r (filas tablero)) #t)
-      (else
-       (let loop-c ((c 0))
-         (cond
-           ((= c (cols tablero)) (loop-f (add1 r)))
-           (else
-            (define cel (buscar tablero r c))
-            (define es-mina (car cel))
-            (if (or es-mina (en-set? (list r c) abiertas))
-                (loop-c (add1 c))
-                #f))))))))
+  (gano?-rc tablero abiertas 0 0))
+
+(define (gano?-rc tablero abiertas r c)
+  (cond
+    ((= r (filas tablero)) #t)
+    ((= c (cols tablero))  (gano?-rc tablero abiertas (add1 r) 0))
+    (else
+     (if (or (car (buscar tablero r c)) (en-set? (list r c) abiertas))
+         (gano?-rc tablero abiertas r (add1 c))
+         #f))))

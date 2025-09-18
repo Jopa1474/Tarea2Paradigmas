@@ -4,10 +4,13 @@
 ;; =========================================
 ;; Parámetros base
 ;; =========================================
+(define cell-size 32) ; tamaño de cada celda en píxeles
+
+;; valores iniciales (se ajustan al elegir nivel)
 (define FILAS 8)
 (define COLS  8)
 
-;; Nivel actual (box para que on-char reinicie con el mismo)
+;; Nivel actual
 (define nivel-actual (box 'medio)) ; 'facil | 'medio | 'dificil
 
 ;; estado = (list tablero abiertas banderas derrota? victoria? first?)
@@ -16,7 +19,7 @@
   (box (list (generar-tablero-nivel FILAS COLS (unbox nivel-actual))
              '() '() #f #f #t)))
 
-;; Accesores seguros por índice (evita líos al agregar campos)
+;; Accesores
 (define (S-tab s)    (list-ref s 0))
 (define (S-abr s)    (list-ref s 1))
 (define (S-ban s)    (list-ref s 2))
@@ -24,20 +27,28 @@
 (define (S-gana s)   (list-ref s 4))
 (define (S-first s)  (list-ref s 5))
 
+(define canvas #f) ; lo definimos más abajo
+
 (define (set-estado! nuevo)
   (set-box! estado nuevo)
   (when canvas (send canvas refresh-now)))
 
 ;; =========================================
-;; Ventana y layout con “tarjetas” (menú/juego)
+;; Ventana y layout (menú/juego)
 ;; =========================================
-(define cell-size 32)
 (define frame (new frame% [label "Buscaminas (Racket GUI)"]))
 
-;; Panel raíz y dos pantallas: menú y juego
-(define root      (new vertical-panel% [parent frame] [stretchable-height #t] [stretchable-width #t]))
-(define menu-pnl  (new vertical-panel% [parent root] [alignment '(center center)] [stretchable-height #t]))
-(define game-pnl  (new vertical-panel% [parent root] [stretchable-height #t]))
+(define root
+  (new vertical-panel% [parent frame]
+       [stretchable-height #t] [stretchable-width #t]))
+
+(define menu-pnl
+  (new vertical-panel% [parent root]
+       [alignment '(center center)] [stretchable-height #t]))
+
+(define game-pnl
+  (new vertical-panel% [parent root]
+       [alignment '(left top)] [stretchable-height #t]))
 (send game-pnl show #f) ; inicia oculto
 
 ;; -----------------------------------------
@@ -100,7 +111,6 @@
   (when gan (overlay dc "🎉 ¡Ganaste!" canvas))
 )
 
-
 ;; -----------------------------------------
 ;; Primer click seguro (utilidad)
 ;; -----------------------------------------
@@ -127,39 +137,32 @@
     ;; Mouse
     (define/override (on-event e)
       (define et (send e get-event-type)) ; 'left-down, 'right-down, ...
-      (cond
-        ;; Solo procesamos eventos down de izq/der
-        ((or (eq? et 'left-down) (eq? et 'right-down))
-         (define s      (unbox estado))
-         (define tab    (S-tab s))
-         (define ab     (S-abr s))
-         (define ba     (S-ban s))
-         (define der    (S-der s))
-         (define gan    (S-gana s))
-         (define first? (S-first s))
-         (unless (or der gan)
-           (define x (send e get-x))
-           (define y (send e get-y))
-           (define r (quotient y cell-size))
-           (define c (quotient x cell-size))
-           (when (en-rango? tab r c)
-             (cond
-               ;; Click derecho: bandera (no afecta first?)
-               ((eq? et 'right-down)
-                (set-estado! (list tab ab (alternar-bandera ba r c) #f (gano? tab ab) first?)))
-               ;; Click izquierdo:
-               (else
+      (when (or (eq? et 'left-down) (eq? et 'right-down))
+        (define s      (unbox estado))
+        (define tab    (S-tab s))
+        (define ab     (S-abr s))
+        (define ba     (S-ban s))
+        (define der    (S-der s))
+        (define gan    (S-gana s))
+        (define first? (S-first s))
+        (unless (or der gan)
+          (define x (send e get-x))
+          (define y (send e get-y))
+          (define r (quotient y cell-size))
+          (define c (quotient x cell-size))
+          (when (en-rango? tab r c)
+            (if (eq? et 'right-down)
+                ;; bandera
+                (set-estado! (list tab ab (alternar-bandera ba r c) #f (gano? tab ab) first?))
+                ;; click izquierdo
                 (if first?
-                    ;; Primer click seguro: regenerar hasta que (r,c) sea 0 y hacer flood-reveal
                     (let* ((nivel (unbox nivel-actual))
                            (t2    (generar-tablero-seguro (filas tab) (cols tab) nivel r c)))
                       (let-values (((ab2 boom) (revelar t2 '() r c))) ; flood desde vacío
                         (set-estado! (list t2 ab2 ba #f (gano? t2 ab2) #f))))
-                    ;; Click normal
                     (let-values (((ab2 boom) (revelar tab ab r c)))
                       (define win2 (and (not boom) (gano? tab ab2)))
                       (set-estado! (list tab ab2 ba boom win2 first?)))))))))
-        (else (void))))
 
     ;; Teclado
     (define/override (on-char e)
@@ -167,14 +170,15 @@
       (when (equal? k #\r)
         (set-estado! (list (generar-tablero-nivel FILAS COLS (unbox nivel-actual))
                            '() '() #f #f #t)))))
-)
+) ; <-- cierra (class ...) y luego (define my-canvas%)
+
+
+
+
 
 ;; =========================================
-;; Construcción fija de la pantalla de JUEGO
-;; (barra arriba + canvas abajo, orden estable)
+;; Pantalla de JUEGO (barra fija + canvas directo)
 ;; =========================================
-
-;; Barra superior fija
 (define game-bar
   (new horizontal-panel% [parent game-pnl] [stretchable-height #f]))
 
@@ -186,19 +190,15 @@
 (new button%  [parent game-bar] [label "Volver al menú"]
      [callback (lambda (_1 _2) (mostrar-menu!))])
 
-;; Contenedor del canvas (debajo de la barra)
-(define canvas-holder
-  (new vertical-panel% [parent game-pnl] [stretchable-height #t] [stretchable-width #t]))
+;; Canvas directamente debajo de la barra (no stretchable en altura)
+(set! canvas
+      (new my-canvas%
+           [parent game-pnl]
+           [min-width  (* COLS cell-size)]
+           [min-height (* FILAS cell-size)]
+           [stretchable-height #f]
+           [style '(no-autoclear)]))
 
-;; Canvas (una sola vez)
-(define canvas
-  (new my-canvas%
-       [parent canvas-holder]
-       [min-width  (* COLS cell-size)]
-       [min-height (* FILAS cell-size)]
-       [style '(no-autoclear)]))
-
-;; Utilidad: actualizar texto de la barra y enfocar canvas
 (define (actualizar-barra!)
   (send lbl-msg set-label
         (format "Nivel: ~a   |   Izq: descubrir  |  Der: bandera  |  R: reiniciar"
@@ -206,7 +206,25 @@
   (send canvas focus))
 
 ;; =========================================
-;; Lógica de navegación
+;; Tamaños por nivel + ajuste del canvas
+;; =========================================
+(define (dims-por-nivel nivel)
+  (cond [(eq? nivel 'facil)   (values 8  8)]
+        [(eq? nivel 'medio)   (values 12 12)]
+        [(eq? nivel 'dificil) (values 16 16)]
+        [else                 (values 12 12)]))
+
+(define (aplicar-dims-por-nivel! nivel)
+  (define-values (f c) (dims-por-nivel nivel))
+  (set! FILAS f)
+  (set! COLS  c)
+  ;; Ajusta el tamaño mínimo del canvas (no lo recrea)
+  (send canvas min-width  (* COLS cell-size))
+  (send canvas min-height (* FILAS cell-size))
+  (send frame reflow-container))
+
+;; =========================================
+;; Navegación
 ;; =========================================
 (define (mostrar-menu!)
   (send game-pnl show #f)
@@ -215,7 +233,8 @@
 
 (define (iniciar-juego! nivel)
   (set-box! nivel-actual nivel)
-  ;; Reinicia con first? = #t para activar el primer click seguro
+  (aplicar-dims-por-nivel! nivel) ; cambia dimensiones y redibuja
+  ;; Reinicia con first? = #t (primer click seguro)
   (set-estado! (list (generar-tablero-nivel FILAS COLS nivel) '() '() #f #f #t))
   (actualizar-barra!)
   (send menu-pnl show #f)
@@ -225,7 +244,7 @@
   (send canvas focus))
 
 ;; =========================================
-;; UI del menú
+;; Menú
 ;; =========================================
 (new message% [parent menu-pnl]
      [label "Elige dificultad:"] [auto-resize #t])
