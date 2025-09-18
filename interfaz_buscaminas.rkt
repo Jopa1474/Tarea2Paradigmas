@@ -49,13 +49,43 @@
   (send dc draw-text txt (+ x (quotient (- w tw) 2))
                         (+ y (quotient (- h th) 2))))
 
-(define (overlay dc txt canvas)
+(define (overlay dc txt canvas color-ok? )
   (define w (send canvas get-width))
   (define h (send canvas get-height))
-  (send dc set-brush "light gray" 'solid) ; sin alfa por compatibilidad
-  (send dc set-pen "black" 1 'transparent)
-  (send dc draw-rectangle 0 0 w h)
-  (draw-centered dc txt 0 0 w h))
+
+  ;; Guardar estilo actual
+  (define old-font (send dc get-font))
+  (define old-color (send dc get-text-foreground))
+
+  ;; Selección de colores según si ganó o perdió
+  (define main-color (if color-ok? RETRO-EDGE RETRO-RED))
+  (define shadow-color (if color-ok?
+                           RETRO-EDGE-DIM
+                           (make-object color% 150 0 0))) ; sombra oscura roja
+
+  ;; Fuente retro solo aquí
+  (send dc set-font retro-message-font)
+
+  ;; Calcular posición centrada
+  (define-values (tw th _1 _2) (send dc get-text-extent txt))
+  (define tx (quotient (- w tw) 2))
+  (define ty (quotient (- h th) 2))
+
+  ;; Sombra
+  (send dc set-text-foreground shadow-color)
+  (send dc draw-text txt (+ tx 2) (+ ty 2))
+  ;; Texto principal
+  (send dc set-text-foreground main-color)
+  (send dc draw-text txt tx ty)
+
+  ;; Restaurar estilo original
+  (send dc set-font old-font)
+  (send dc set-text-foreground old-color))
+
+
+
+
+
 
 (define (dibujar-tablero dc s canvas)
   ;; LIMPIEZA del lienzo (importante si usas 'no-autoclear)
@@ -92,17 +122,29 @@
                                    (= (cadr a) (cadr b))))))
 
       (cond
+        ;; Si se perdió el juego y hay una mina en esta celda → mostrar bomba
+        ((and der mina?) (draw-centered dc "💣" x y w h))
+
+        ;; Celda descubierta y es mina (primer clic inseguro o bug) → bomba
         ((and descubierto? mina?) (draw-centered dc "💣" x y w h))
+
+        ;; Celda descubierta y no es mina → mostrar número o vacío
         (descubierto?
          (send dc set-brush "white" 'solid)
          (send dc draw-rectangle (+ x 1) (+ y 1) (- w 2) (- h 2))
          (when (> pista 0)
            (draw-centered dc (number->string pista) x y w h)))
-        (marcado? (draw-centered dc "⚑" x y w h))
-        (else (void)))) )
 
-  (when der (overlay dc "💥 BOOM — Perdiste" canvas))
-  (when gan (overlay dc "🎉 ¡Ganaste!" canvas))
+        ;; Marcada con bandera
+        (marcado? (draw-centered dc "⚑" x y w h))
+
+        ;; En cualquier otro caso no mostrar nada
+        (else (void))))
+ )
+
+  (when der (overlay dc "💥 BOOM — Perdiste" canvas #f))
+  (when gan (overlay dc "🎉 ¡Ganaste!" canvas #t))
+
 )
 
 ;; -----------------------------------------
@@ -193,6 +235,7 @@
 
 (define retro-title-font (make-object font% 36 'modern 'normal 'bold))
 (define retro-btn-font   (make-object font% 16 'modern 'normal 'bold))
+(define retro-message-font   (make-object font% 30 'modern 'normal 'bold))
 
 ;; --- Título en canvas: “BuscaCE” (igual) ---
 (define retro-title%
@@ -441,7 +484,7 @@
   (send canvas focus))
 
 ;; =========================================
-;; Iniciar juego (respeta tamaño personalizado)
+;; Iniciar juego (tamaño personalizado)
 ;; =========================================
 (set! iniciar-juego!
       (lambda (nivel)
