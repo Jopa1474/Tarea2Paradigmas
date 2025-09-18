@@ -10,6 +10,9 @@
 (define FILAS 8)
 (define COLS  8)
 
+;; Flag: ¿tamaños personalizados activos?
+(define dims-personalizadas? (box #f))
+
 ;; Nivel actual
 (define nivel-actual (box 'medio)) ; 'facil | 'medio | 'dificil
 
@@ -103,9 +106,8 @@
 )
 
 ;; -----------------------------------------
-;; Primer click seguro (utilidad)
+;; Primer click seguro (misma idea)
 ;; -----------------------------------------
-;; Genera un tablero del nivel dado tal que la celda (r,c) NO tenga mina y su pista sea 0.
 (define (generar-tablero-seguro filas cols nivel r c)
   (let loop ()
     (define t (generar-tablero-nivel filas cols nivel))
@@ -150,7 +152,7 @@
                     (let* ((nivel (unbox nivel-actual))
                            (t2    (generar-tablero-seguro (filas tab) (cols tab) nivel r c)))
                       (let-values (((ab2 boom) (revelar t2 '() r c))) ; flood desde vacío
-                        (set-estado! (list t2 ab2 ba #f (gano? t2 ab2) #f)) ))
+                        (set-estado! (list t2 ab2 ba #f (gano? t2 ab2) #f))))
                     (let-values (((ab2 boom) (revelar tab ab r c)))
                       (define win2 (and (not boom) (gano? tab ab2)))
                       (set-estado! (list tab ab2 ba boom win2 first?)))))))))
@@ -161,10 +163,11 @@
       (when (equal? k #\r)
         (set-estado! (list (generar-tablero-nivel FILAS COLS (unbox nivel-actual))
                            '() '() #f #f #t)))))
-) ; <-- cierra (class ...) y luego (define my-canvas%)
+) ; <-- cierra (define my-canvas%)
+
 
 ;; =========================================
-;; Tamaños por nivel
+;; Tamaños por nivel (por defecto; se ignoran si el usuario personaliza)
 ;; =========================================
 (define (dims-por-nivel nivel)
   (cond [(eq? nivel 'facil)   (values 8  8)]
@@ -178,24 +181,22 @@
   (set! COLS  c))
 
 ;; =========================================
-;; VENTANA DEL MENÚ (independiente del juego) — ESTILO RETRO
+;; MENÚ (igual estilo, con botón extra “Personalizar…”)
 ;; =========================================
 
 ;; --- Paleta & fuentes retro ---
-(define RETRO-BG       (make-object color%  20  24  28))   ; gris muy oscuro
-(define RETRO-PANEL    (make-object color%  32  36  44))   ; panel
-(define RETRO-EDGE     (make-object color%   0 255 153))   ; verde neón
-(define RETRO-EDGE-DIM (make-object color%   0 180 120))   ; borde atenuado
-(define RETRO-TEXT     (make-object color% 235 255 245))   ; texto claro
-(define RETRO-TEXT-DIM (make-object color% 180 210 200))   ; texto hover
-(define RETRO-RED      (make-object color% 255  64  64))   ; rojo (opcional)
+(define RETRO-BG       (make-object color%  20  24  28))
+(define RETRO-PANEL    (make-object color%  32  36  44))
+(define RETRO-EDGE     (make-object color%   0 255 153))
+(define RETRO-EDGE-DIM (make-object color%   0 180 120))
+(define RETRO-TEXT     (make-object color% 235 255 245))
+(define RETRO-TEXT-DIM (make-object color% 180 210 200))
+(define RETRO-RED      (make-object color% 255  64  64))
 
 (define retro-title-font (make-object font% 36 'modern 'normal 'bold))
 (define retro-btn-font   (make-object font% 16 'modern 'normal 'bold))
 
-
-
-;; --- Título en canvas: “BuscaCE” ---
+;; --- Título en canvas: “BuscaCE” (igual) ---
 (define retro-title%
   (class canvas%
     (super-new [style '(no-autoclear)]
@@ -204,28 +205,24 @@
       (define dc (send this get-dc))
       (define w  (send this get-width))
       (define h  (send this get-height))
-      ;; fondo
       (send dc set-brush RETRO-BG 'solid)
       (send dc set-pen   RETRO-BG 1 'transparent)
       (send dc draw-rectangle 0 0 w h)
-      ;; marco exterior
       (send dc set-pen RETRO-EDGE 3 'solid)
       (send dc set-brush RETRO-PANEL 'solid)
       (send dc draw-rectangle 8 8 (- w 16) (- h 16))
-      ;; texto
       (send dc set-font retro-title-font)
       (send dc set-text-foreground RETRO-EDGE)
       (define title "BuscaCE")
       (define-values (tw th _1 _2) (send dc get-text-extent title))
       (define tx (quotient (- w tw) 2))
       (define ty (quotient (- h th) 2))
-      ;; sombra leve
       (send dc set-text-foreground RETRO-EDGE-DIM)
       (send dc draw-text title (+ tx 2) (+ ty 2))
       (send dc set-text-foreground RETRO-EDGE)
       (send dc draw-text title tx ty))))
 
-;; --- Botón retro en canvas ---
+;; --- Botón retro en canvas (igual) ---
 (define retro-button%
   (class canvas%
     (init-field label on-click)
@@ -239,21 +236,17 @@
       (define dc (send this get-dc))
       (define w  (send this get-width))
       (define h  (send this get-height))
-      ;; fondo
       (send dc set-brush (if active? RETRO-BG RETRO-PANEL) 'solid)
       (send dc set-pen   (if hover? RETRO-EDGE RETRO-EDGE-DIM) 3 'solid)
       (send dc draw-rounded-rectangle 0 0 w h 6)
-      ;; borde interior “pixel”
       (send dc set-pen (if hover? RETRO-EDGE RETRO-EDGE-DIM) 1 'solid)
       (send dc draw-rounded-rectangle 3 3 (- w 6) (- h 6) 4)
-      ;; texto
       (send dc set-font retro-btn-font)
       (send dc set-text-foreground (if hover? RETRO-TEXT RETRO-TEXT-DIM))
       (define-values (tw th _1 _2) (send dc get-text-extent label))
       (define tx (quotient (- w tw) 2))
       (define ty (quotient (- h th) 2))
       (send dc draw-text label tx ty))
-
     (define/override (on-paint) (paint!))
     (define/override (on-size w h) (send this refresh-now))
     (define/override (on-event e)
@@ -267,14 +260,11 @@
            (set! active? #f)
            (send this refresh-now)
            (when (procedure? on-click) (on-click this e)))]
-        [else (void)])))
+        [else (void)]))))
 
-  )
-
-;; --- Helper para crear botones con callback sencillo ---
 (define (make-retro-button parent text cb)
   (new retro-button% [parent parent]
-       [label (format "▶ ~a" text)] ; flecha retro
+       [label (format "▶ ~a" text)]
        [on-click (lambda (_btn _e) (cb))]))
 
 ;; -------- Frame del MENÚ --------
@@ -286,35 +276,91 @@
        [spacing 12]
        [stretchable-width #t] [stretchable-height #t]))
 
-;; Fondo del frame (puede que algunas plataformas lo ignoren)
 (with-handlers ([exn:fail? (lambda (_e) (void))])
   (send menu-frame set-background RETRO-BG))
 
-;; Título
 (new retro-title% [parent menu-root])
 
-;; Contenedor de botones
 (define btns
   (new vertical-panel% [parent menu-root]
        [alignment '(center center)]
        [spacing 10]
        [stretchable-width #f] [stretchable-height #f]))
 
-;; forward-declare (ya la tienes arriba)
+;; Declaración adelantada
 (define iniciar-juego! #f)
 
-;; Botones de nivel (retro)
+(define (abrir-dialogo-personalizar!)
+  (define dlg (new dialog% (label "Tamaño personalizado (8–15)")))
+  (define pnl (new vertical-panel%
+                   (parent dlg)
+                   (alignment '(center center))
+                   (spacing 6) (horiz-margin 12) (vert-margin 12)))
+
+  (new message% (parent pnl)
+       (label "Ingresa filas y columnas entre 8 y 15 (rectángulos permitidos)."))
+
+  (define row-pnl (new horizontal-panel% (parent pnl) (spacing 6)))
+
+  (new message% (parent row-pnl) (label "Filas:"))
+  (define tf-fil
+    (new text-field%
+         (parent row-pnl)
+         (label "")
+         (init-value (number->string FILAS))
+         (min-width 60)))
+
+  (new message% (parent row-pnl) (label "Cols:"))
+  (define tf-col
+    (new text-field%
+         (parent row-pnl)
+         (label "")
+         (init-value (number->string COLS))
+         (min-width 60)))
+
+  (define btns-pnl (new horizontal-panel% (parent pnl) (spacing 8)))
+
+  ;; Botón Aceptar
+  (new button% (parent btns-pnl) (label "Aceptar")
+       (callback
+        (lambda (_1 _2)
+          (define maybe-f (string->number (send tf-fil get-value)))
+          (define maybe-c (string->number (send tf-col get-value)))
+          (cond
+            ((or (not (integer? maybe-f)) (not (integer? maybe-c)))
+             (message-box "Error" "Debes ingresar números enteros." dlg))
+            ((or (< maybe-f 8) (> maybe-f 15) (< maybe-c 8) (> maybe-c 15))
+             (message-box "Error" "Valores fuera de rango (8..15)." dlg))
+            (else
+             (set! FILAS maybe-f)
+             (set! COLS  maybe-c)
+             (set-box! dims-personalizadas? #t)
+             (send dlg show #f)
+             (message-box "Listo"
+                          (format "Tamaño establecido: ~a×~a.\nElige un nivel para empezar."
+                                  FILAS COLS)
+                          menu-frame))))))
+
+  ;; Botón Cancelar
+  (new button% (parent btns-pnl) (label "Cancelar")
+       (callback (lambda (_1 _2) (send dlg show #f))))
+
+  (send dlg show #t))
+
+
+
+
+;; Botón NUEVO
+(make-retro-button btns "Personalizar tablero…" abrir-dialogo-personalizar!)
+
+;; Botones de nivel (usan tamaño por defecto, salvo que usuario haya personalizado)
 (make-retro-button btns "Fácil"  (lambda () (iniciar-juego! 'facil)))
 (make-retro-button btns "Medio"  (lambda () (iniciar-juego! 'medio)))
 (make-retro-button btns "Difícil" (lambda () (iniciar-juego! 'dificil)))
 
-;; (Opcional) botón salir
-;; (make-retro-button btns "Salir" (lambda () (send menu-frame show #f)))
-
 ;; Mostrar y centrar el menú
 (send menu-frame show #t)
 (send menu-frame center 'both)
-
 
 ;; =========================================
 ;; VENTANA DEL JUEGO (se crea al iniciar)
@@ -329,77 +375,58 @@
 ;; Ajusta la ventana de juego al tamaño del tablero + barra
 (define (ajustar-ventana-a-tablero!)
   (when (and game-frame canvas)
-    (define cw (* COLS cell-size))   ; ancho tablero
-    (define ch (* FILAS cell-size))  ; alto  tablero
-
-    ;; 1) asegurar min-size del canvas
+    (define cw (* COLS cell-size))
+    (define ch (* FILAS cell-size))
     (send canvas min-width  cw)
     (send canvas min-height ch)
-
-    ;; 2) estimar alto de la barra como el mayor min-size de sus hijos
     (define bh
       (let-values ([(w1 h1) (send lbl-msg   get-graphical-min-size)]
                    [(w2 h2) (send btn-volver get-graphical-min-size)])
         (max h1 h2)))
-
-    ;; 3) forzar min-sizes en contenedores del juego
     (send game-pnl  min-width  cw)
     (send game-pnl  min-height (+ ch bh))
     (send game-root min-width  cw)
     (send game-root min-height (+ ch bh))
-
-    ;; 4) reflow antes de medir
     (send game-frame reflow-container)
-
-    ;; 5) calcular “chrome” del frame y redimensionar total con precisión
     (let-values ([(fw fh)   (send game-frame get-size)]
                  [(fcw fch) (send game-frame get-client-size)])
       (define chrome-w (- fw fcw))
       (define chrome-h (- fh fch))
       (send game-frame resize (+ cw chrome-w) (+ (+ ch bh) chrome-h)))
-
-    ;; 6) foco al canvas del juego
     (send canvas focus)))
 
 ;; Actualiza el texto de la barra del juego
 (define (actualizar-barra!)
   (when lbl-msg
     (send lbl-msg set-label
-          (format "Nivel: ~a   |   Izq: descubrir  |  Der: bandera  |  R: reiniciar"
-                  (symbol->string (unbox nivel-actual)))))
+          (format "Nivel: ~a   |   Izq: descubrir  |  Der: bandera  |  R: reiniciar   |   Tamaño: ~ax~a"
+                  (symbol->string (unbox nivel-actual)) FILAS COLS)))
   (when canvas (send canvas focus)))
 
-;; Volver al menú (cierra/oculta la ventana de juego y muestra menú)
+;; Volver al menú
 (define (mostrar-menu!)
   (when game-frame (send game-frame show #f))
   (send menu-frame show #t)
   (send menu-frame center 'both)
   (send menu-frame reflow-container))
 
-;; Crea el frame del juego, su barra y su canvas PROPIOS (separados del menú)
+;; Crea el frame del juego
 (define (crear-game-frame!)
   (set! game-frame (new frame% [label "Buscaminas — Juego"]))
   (set! game-root
         (new vertical-panel% [parent game-frame]
              [stretchable-width #t] [stretchable-height #t]
              [alignment '(left top)]))
-
-  ;; Barra fija arriba
   (set! game-bar (new horizontal-panel% [parent game-root] [stretchable-height #f]))
-
   (set! lbl-msg
         (new message% [parent game-bar]
-             [label (format "Nivel: ~a   |   Izq: descubrir  |  Der: bandera  |  R: reiniciar"
-                            (symbol->string (unbox nivel-actual)))]))
-
+             [label (format "Nivel: ~a   |   Izq: descubrir  |  Der: bandera  |  R: reiniciar   |   Tamaño: ~ax~a"
+                            (symbol->string (unbox nivel-actual)) FILAS COLS)]))
   (set! btn-volver
         (new button% [parent game-bar] [label "Volver al menú"]
              [callback (lambda (_1 _2) (mostrar-menu!))]))
-
-  ;; Panel y canvas del JUEGO (no stretchable en altura; separado del menú)
   (set! game-pnl (new vertical-panel% [parent game-root]
                       [alignment '(left top)] [stretchable-height #t]))
-
   (set! canvas
         (new my-canvas%
              [parent game-pnl]
@@ -407,7 +434,6 @@
              [min-height (* FILAS cell-size)]
              [stretchable-height #f]
              [style '(no-autoclear)]))
-
   (send game-frame show #t)
   (send game-frame center 'both)
   (send game-frame reflow-container)
@@ -416,21 +442,20 @@
   (send canvas focus))
 
 ;; =========================================
-;; Iniciar juego (abre frame del juego y oculta el menú)
+;; Iniciar juego (respeta tamaño personalizado)
 ;; =========================================
 (set! iniciar-juego!
       (lambda (nivel)
         (set-box! nivel-actual nivel)
-        (aplicar-dims-por-nivel! nivel)
-
+        ;; Si NO hay tamaño personalizado, usa el tamaño por defecto del nivel
+        (when (not (unbox dims-personalizadas?))
+          (aplicar-dims-por-nivel! nivel))
         ;; Reinicia estado con first? = #t (primer click seguro)
         (set-estado! (list (generar-tablero-nivel FILAS COLS nivel) '() '() #f #f #t))
-
-        ;; Crear y mostrar frame/canvas del juego
+        ;; Crear ventana de juego
         (crear-game-frame!)
         (actualizar-barra!)
-
-        ;; Ocultar menú y asegurar render inicial
+        ;; Ocultar menú y asegurar render
         (send menu-frame show #f)
         (send game-frame reflow-container)
         (send canvas refresh-now)

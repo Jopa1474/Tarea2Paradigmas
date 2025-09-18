@@ -12,7 +12,7 @@
 (provide
   ;; construcción
   crear-tablero
-  colocar-minas
+  colocar-minas-exacto      ; NUEVO: coloca exactamente K minas
   tablerizar-con-pistas
   generar-tablero-nivel
 
@@ -75,21 +75,6 @@
             (actualizar-celda-cols (cdr fila) c nueva (add1 j)))))
 
 ;; --------------------------
-;; Colocar minas (sin map)
-;; --------------------------
-(define (colocar-minas tablero prob)
-  (if (null? tablero)
-      '()
-      (cons (colocar-minas-fila (car tablero) prob)
-            (colocar-minas (cdr tablero) prob))))
-
-(define (colocar-minas-fila fila prob)
-  (if (null? fila)
-      '()
-      (cons (if (< (random) prob) '(#t 0 #f #f) (car fila))
-            (colocar-minas-fila (cdr fila) prob))))
-
-;; --------------------------
 ;; Vecindad y conteos
 ;; --------------------------
 (define offsets
@@ -145,16 +130,55 @@
        r (add1 c))))
 
 ;; --------------------------
-;; Crear tablero por nivel
+;; Colocar minas: EXACTO K (no probabilístico)
 ;; --------------------------
-(define (nivel->prob nivel)
-  (cond ((eq? nivel 'facil)   0.10)
-        ((eq? nivel 'medio)   0.15)
-        (else                 0.20)))
+(define (todas-las-coords n m)
+  (todas-las-coords-r n m 0 0))
+
+(define (todas-las-coords-r n m r c)
+  (cond [(= r n) '()]
+        [(= c m) (todas-las-coords-r n m (add1 r) 0)]
+        [else (cons (list r c) (todas-las-coords-r n m r (add1 c)))]))
+
+;; baraja simple (Fisher–Yates recursivo)
+(define (shuffle lst)
+  (if (null? lst) '()
+      (let* ([len (length lst)]
+             [idx (random len)]
+             [x   (list-ref lst idx)]
+             [rest (append (take lst idx) (drop lst (add1 idx)))])
+        (cons x (shuffle rest)))))
+
+(define (colocar-minas-exacto tablero k)
+  (let* ([n (filas tablero)]
+         [m (cols tablero)]
+         [coords (shuffle (todas-las-coords n m))])
+    (colocar-minas-en-coords tablero (take coords (min k (* n m))))))
+
+(define (colocar-minas-en-coords tablero coords)
+  (if (null? coords)
+      tablero
+      (let* ([r (caar coords)]
+             [c (cadar coords)]
+             [cel (buscar tablero r c)]
+             [cel* (list #t 0 (caddr cel) (cadddr cel))])
+        (colocar-minas-en-coords (actualizar-celda tablero r c cel*) (cdr coords)))))
+
+;; --------------------------
+;; Crear tablero por nivel (con % exacto)
+;; --------------------------
+(define (nivel->ratio nivel)
+  (cond [(eq? nivel 'facil)   0.10]
+        [(eq? nivel 'medio)   0.15]
+        [else                 0.20]))
 
 (define (generar-tablero-nivel n m nivel)
-  (tablerizar-con-pistas
-   (colocar-minas (crear-tablero n m) (nivel->prob nivel))))
+  (let* ([ratio (nivel->ratio nivel)]
+         [total (* n m)]
+         [k (max 1 (inexact->exact (round (* total ratio))))] ; exacto al %
+         [vacio (crear-tablero n m)]
+         [con-minas (colocar-minas-exacto vacio k)])
+    (tablerizar-con-pistas con-minas)))
 
 ;; --------------------------
 ;; Conjuntos simples de coordenadas
