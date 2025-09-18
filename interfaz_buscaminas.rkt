@@ -39,6 +39,14 @@
   (set-box! estado nuevo)
   (when canvas (send canvas refresh-now)))
 
+;; ===== Cache para texto del mensaje (sin cambiar de fuente por frame)
+(define msg-base-font (make-object font% 34 'modern 'normal 'bold))
+(define msg-text-ext (box #f)) ; guardará '(tw th) medidos con msg-base-font
+
+(define (reset-msg-cache!)
+  (set-box! msg-text-ext #f))
+
+
 
 ;; ==========================
 ;; Animación de derrota
@@ -82,6 +90,134 @@
                    (set-box! minas-anim (cons (car cola) (unbox minas-anim)))
                    (set! cola (cdr cola))
                    (when canvas (send canvas refresh-now))]))])))
+
+
+
+
+;; ==========================
+;; Animación de mensaje (GANAR / PERDER)
+;; ==========================
+(define msg-anim-kind (box #f))   ; 'win | 'lose | #f (inactivo)
+(define msg-anim-t    (box 0.0))  ; progreso 0.0..1.0
+(define msg-anim-tmr  #f)         ; timer% o #f
+
+;; === Fade por BLENDING (sin canal alfa real) ===
+;; Color de fondo donde "desaparece" el texto (gris del canvas: #ECECEC)
+(define OVERLAY-BG (make-object color% 236 236 236))
+
+(define (lerp ch-base ch-bg t)
+  (inexact->exact (round (+ (* (- 1.0 t) ch-bg) (* t ch-base)))))
+
+(define (fade-color-to bg c t)
+  ;; t=0 => bg ; t=1 => c
+  (make-object color%
+               (lerp (send c red)   (send bg red)   t)
+               (lerp (send c green) (send bg green) t)
+               (lerp (send c blue)  (send bg blue)  t)))
+
+;; Easing (suave): easeOutCubic
+(define (ease-out-cubic t)
+  (define u (- 1.0 t))
+  (- 1.0 (* u u u)))
+
+;; Easing tipo “overshoot” (easeOutBack) — CORREGIDO
+(define (ease-out-back t)
+  (define c1 1.70158)
+  (define c3 (+ c1 1.0))
+  (define u (- t 1.0))
+  (+ 1.0 (+ (* c3 u u u) (* c1 u u))))
+
+;; Iniciar animación de mensaje
+(define (start-msg-anim! kind)
+  ;; detener anterior si existe
+  (when msg-anim-tmr (send msg-anim-tmr stop) (set! msg-anim-tmr #f))
+  (set-box! msg-anim-kind kind)
+  (set-box! msg-anim-t 0.0)
+  (set! msg-anim-tmr
+        (new timer%
+             [interval 16] ; ~60 FPS
+             [notify-callback
+              (lambda ()
+                (define t (+ (unbox msg-anim-t) 0.03)) ; ~0.5s–0.6s de anim
+                (if (>= t 1.0)
+                    (begin
+                      (set-box! msg-anim-t 1.0)
+                      (send msg-anim-tmr stop)
+                      (set! msg-anim-tmr #f))
+                    (set-box! msg-anim-t t))
+                (when canvas (send canvas refresh-now)))])))
+
+;; Dibujo del overlay ANIMADO (centrado en el TABLERO)
+(define (overlay-anim dc canvas)
+  (define kind (unbox msg-anim-kind))
+  (when kind
+    (define raw-t (unbox msg-anim-t))
+    (define t (ease-out-cubic raw-t))         ; suavizado base
+    (define pop (ease-out-back raw-t))        ; “pop” de tamaño
+
+    (define txt (if (eq? kind 'win) "🎉 ¡Ganaste!" "💥 BOOM — Perdiste"))
+    (define ok? (eq? kind 'win))
+
+    ;; colores (con alpha para fade)
+    (define base-main (if ok? RETRO-EDGE RETRO-RED))
+    (define base-shad (if ok? RETRO-EDGE-DIM (make-object color% 150 0 0)))
+    (define alpha (inexact->exact (round (* 255.0 t))))
+        ;; colores con "fade" por mezcla hacia OVERLAY-BG
+    (define main   (fade-color-to OVERLAY-BG base-main t))
+    (define shadow (fade-color-to OVERLAY-BG base-shad (max 0.0 (- t 0.15))))
+
+
+    ;; fuente: hacemos un “pop” de tamaño al aparecer
+    (define base-size 30)
+    (define peak-size 44) ; tamaño máximo durante el pop
+    (define size (inexact->exact
+                  (round (+ base-size (* pop (- peak-size base-size))))))
+    (define anim-font (make-object font% size 'modern 'normal 'bold))
+
+    ;; Centro del tablero (no del canvas)
+    (define-values (ox oy) (board-offset canvas))
+    (define cx (+ ox (quotient (board-w) 2)))
+    (define cy (+ oy (quotient (board-h) 2)))
+
+    ;; Desplazamiento vertical suave (levísimo rebote hacia arriba)
+    (define y-bob (inexact->exact (round (- (* 10.0 (sin (* 3.14159 t))) (* 6.0 t))))) ; sube y luego se estabiliza
+
+    ;; Medición + dibujo
+    (define old-font  (send dc get-font))
+    (define old-color (send dc get-text-foreground))
+    (send dc set-font anim-font)
+
+    (define-values (tw th _1 _2) (send dc get-text-extent txt))
+    (define tx (- cx (quotient tw 2)))
+    (define ty (- cy (quotient th 2)))
+
+    ;; Sombra
+    (send dc set-text-foreground shadow)
+    (send dc draw-text txt (+ tx 2) (+ ty 2 y-bob))
+    ;; Principal
+    (send dc set-text-foreground main)
+    (send dc draw-text txt tx (+ ty y-bob))
+
+    ;; Restaurar
+    (send dc set-font old-font)
+    (send dc set-text-foreground old-color)))
+
+;; Llamado cómodo: si ya terminó la animación, dibuja el mensaje “plano”
+(define (overlay-smart dc canvas gan?)
+  (if (and (unbox msg-anim-kind) (< (unbox msg-anim-t) 1.0))
+      (overlay-anim dc canvas)
+      (overlay dc (if gan? "🎉 ¡Ganaste!" "💥 BOOM — Perdiste") canvas gan?)))
+
+;; Para limpiar animación (reinicio)
+(define (stop-msg-anim!)
+  (when msg-anim-tmr (send msg-anim-tmr stop) (set! msg-anim-tmr #f))
+  (set-box! msg-anim-kind #f)
+  (set-box! msg-anim-t 0.0))
+
+
+
+
+
 
 
 ;; -----------------------------------------
@@ -260,8 +396,8 @@
         [else (void)])))
 
   ;; Overlay centrado respecto al tablero (puede salirse si no cabe)
-  (when der (overlay dc "💥 BOOM — Perdiste" canvas #f))
-  (when gan (overlay dc "🎉 ¡Ganaste!"       canvas #t)))
+   (when der (overlay-smart dc canvas #f))
+   (when gan (overlay-smart dc canvas #t)))
 
 
 ;; -----------------------------------------
@@ -280,22 +416,25 @@
 ;; -----------------------------------------
 ;; Canvas personalizado (EVENTOS)
 ;; -----------------------------------------
+;; ====== my-canvas% con animación de mensajes (ganar/perder) ======
 (define my-canvas%
   (class canvas%
     (super-new
-      [paint-callback (lambda (cnv dc)
-                        (dibujar-tablero dc (unbox estado) cnv))])
+      (paint-callback (lambda (cnv dc)
+                        (dibujar-tablero dc (unbox estado) cnv))))
 
+    ;; ========================
     ;; Mouse
+    ;; ========================
     (define/override (on-event e)
       (define et (send e get-event-type))
       (when (or (eq? et 'left-down) (eq? et 'right-down))
-        (define s      (unbox estado))
-        (define tab    (S-tab s))
-        (define ab     (S-abr s))
-        (define ba     (S-ban s))
-        (define der    (S-der s))
-        (define gan    (S-gana s))
+        (define s (unbox estado))
+        (define tab (S-tab s))
+        (define ab  (S-abr s))
+        (define ba  (S-ban s))
+        (define der (S-der s))
+        (define gan (S-gana s))
         (define first? (S-first s))
         (unless (or der gan)
           (define x (send e get-x))
@@ -304,11 +443,9 @@
           (define bx (- x ox))
           (define by (- y oy))
           (cond
-            ;; Clic fuera del tablero: ignorar
-            [(or (< bx 0) (< by 0)
-                 (>= bx (board-w)) (>= by (board-h)))
-             (void)]
-            [else
+            ((or (< bx 0) (< by 0) (>= bx (board-w)) (>= by (board-h)))
+             (void))
+            (else
              (define r (quotient by cell-size))
              (define c (quotient bx cell-size))
              (when (en-rango? tab r c)
@@ -316,25 +453,30 @@
                    (set-estado! (list tab ab (alternar-bandera ba r c) #f (gano? tab ab) first?))
                    (if first?
                        (let* ((nivel (unbox nivel-actual))
-                              (t2    (generar-tablero-seguro (filas tab) (cols tab) nivel r c)))
+                              (t2 (generar-tablero-seguro (filas tab) (cols tab) nivel r c)))
                          (let-values (((ab2 boom) (revelar t2 '() r c)))
                            (set-estado! (list t2 ab2 ba #f (gano? t2 ab2) #f))))
                        (let-values (((ab2 boom) (revelar tab ab r c)))
                          (define win2 (and (not boom) (gano? tab ab2)))
                          (set-estado! (list tab ab2 ba boom win2 first?))
-                         (when boom (start-loss-animation! tab (list r c)))))))]))))
+                         (when boom
+                           (start-loss-animation! tab (list r c))
+                           (start-msg-anim! 'lose))
+                         (when (and (not boom) win2)
+                           (start-msg-anim! 'win)))))))))))
 
-
+    ;; ========================
     ;; Teclado
+    ;; ========================
     (define/override (on-char e)
       (define k (send e get-key-code))
       (when (equal? k #\r)
-        ;; >>> NUEVO: detener/limpiar animación antes de reiniciar
+        ;; parar animaciones y reiniciar estado
         (when timer-anim (send timer-anim stop) (set! timer-anim #f))
         (set-box! minas-anim '())
+        (stop-msg-anim!)
         (set-estado! (list (generar-tablero-nivel FILAS COLS (unbox nivel-actual))
-                           '() '() #f #f #t))))
-  ))
+                           '() '() #f #f #t))))))
 
 
 
