@@ -330,8 +330,9 @@
             ((or (< maybe-f 8) (> maybe-f 15) (< maybe-c 8) (> maybe-c 15))
              (message-box "Error" "Valores fuera de rango (8..15)." dlg))
             (else
-             (set! FILAS maybe-f)
-             (set! COLS  maybe-c)
+             ;; por esto:
+             (set! FILAS maybe-c)  ; alto
+             (set! COLS  maybe-f)  ; ancho
              (set-box! dims-personalizadas? #t)
              (send dlg show #f)
              (message-box "Listo"
@@ -349,7 +350,7 @@
 
 
 ;; Botón NUEVO
-(make-retro-button btns "Personalizar tablero…" abrir-dialogo-personalizar!)
+(make-retro-button btns "Cambiar tablero" abrir-dialogo-personalizar!)
 
 ;; Botones de nivel (usan tamaño por defecto, salvo que usuario haya personalizado)
 (make-retro-button btns "Fácil"  (lambda () (iniciar-juego! 'facil)))
@@ -398,7 +399,7 @@
   (when lbl-msg
     (send lbl-msg set-label
           (format "Nivel: ~a   |   Izq: descubrir  |  Der: bandera  |  R: reiniciar   |   Tamaño: ~ax~a"
-                  (symbol->string (unbox nivel-actual)) FILAS COLS)))
+                  (symbol->string (unbox nivel-actual)) COLS FILAS)))
   (when canvas (send canvas focus)))
 
 ;; Volver al menú
