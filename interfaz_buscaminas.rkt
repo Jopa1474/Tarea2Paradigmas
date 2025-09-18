@@ -179,6 +179,7 @@
 ;; =========================================
 ;; Pantalla de JUEGO (barra fija + canvas directo)
 ;; =========================================
+;; barra
 (define game-bar
   (new horizontal-panel% [parent game-pnl] [stretchable-height #f]))
 
@@ -187,8 +188,10 @@
        [label (format "Nivel: ~a   |   Izq: descubrir  |  Der: bandera  |  R: reiniciar"
                       (symbol->string (unbox nivel-actual)))]))
 
-(new button%  [parent game-bar] [label "Volver al menú"]
-     [callback (lambda (_1 _2) (mostrar-menu!))])
+(define btn-volver
+  (new button%  [parent game-bar] [label "Volver al menú"]
+       [callback (lambda (_1 _2) (mostrar-menu!))]))
+
 
 ;; Canvas directamente debajo de la barra (no stretchable en altura)
 (set! canvas
@@ -205,6 +208,42 @@
                 (symbol->string (unbox nivel-actual))))
   (send canvas focus))
 
+;; Ajusta la ventana al tamaño del tablero + barra (encoge y agranda)
+(define (ajustar-ventana-a-tablero!)
+  (define cw (* COLS cell-size))   ; ancho del tablero en px
+  (define ch (* FILAS cell-size))  ; alto  del tablero en px
+
+  ;; 1) asegurar que el canvas pida el tamaño correcto
+  (send canvas min-width  cw)
+  (send canvas min-height ch)
+
+  ;; 2) estimar alto de la barra como el mayor min-size de sus hijos
+  (define bh
+    (let-values ([(w1 h1) (send lbl-msg   get-graphical-min-size)]
+                 [(w2 h2) (send btn-volver get-graphical-min-size)])
+      (max h1 h2)))
+
+  ;; 3) forzar min-sizes en los contenedores (ayuda al layout)
+  (send game-pnl min-width  cw)
+  (send game-pnl min-height (+ ch bh))
+  (send root     min-width  cw)
+  (send root     min-height (+ ch bh))
+
+  ;; 4) reflow para colocar todo antes de medir tamaños actuales
+  (send frame reflow-container)
+
+  ;; 5) calcular “chrome” del frame y redimensionar total con precisión
+  (let-values ([(fw fh)   (send frame get-size)]         ; tamaño total actual
+               [(fcw fch) (send frame get-client-size)]) ; área cliente actual
+    (define chrome-w (- fw fcw))
+    (define chrome-h (- fh fch))
+    (send frame resize (+ cw chrome-w) (+ (+ ch bh) chrome-h)))
+
+  ;; 6) foco al canvas
+  (send canvas focus))
+
+
+
 ;; =========================================
 ;; Tamaños por nivel + ajuste del canvas
 ;; =========================================
@@ -218,10 +257,8 @@
   (define-values (f c) (dims-por-nivel nivel))
   (set! FILAS f)
   (set! COLS  c)
-  ;; Ajusta el tamaño mínimo del canvas (no lo recrea)
-  (send canvas min-width  (* COLS cell-size))
-  (send canvas min-height (* FILAS cell-size))
-  (send frame reflow-container))
+  (ajustar-ventana-a-tablero!))
+
 
 ;; =========================================
 ;; Navegación
@@ -233,7 +270,7 @@
 
 (define (iniciar-juego! nivel)
   (set-box! nivel-actual nivel)
-  (aplicar-dims-por-nivel! nivel) ; cambia dimensiones y redibuja
+  (aplicar-dims-por-nivel! nivel) ; ajusta y reflow + set-client-size
   ;; Reinicia con first? = #t (primer click seguro)
   (set-estado! (list (generar-tablero-nivel FILAS COLS nivel) '() '() #f #f #t))
   (actualizar-barra!)
@@ -242,6 +279,7 @@
   (send frame reflow-container)
   (send canvas refresh-now)
   (send canvas focus))
+
 
 ;; =========================================
 ;; Menú
