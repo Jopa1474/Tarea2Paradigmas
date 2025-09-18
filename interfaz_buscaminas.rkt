@@ -178,34 +178,143 @@
   (set! COLS  c))
 
 ;; =========================================
-;; VENTANA DEL MENÚ (independiente del juego)
+;; VENTANA DEL MENÚ (independiente del juego) — ESTILO RETRO
 ;; =========================================
-(define menu-frame (new frame% [label "Buscaminas — Menú"]))
 
+;; --- Paleta & fuentes retro ---
+(define RETRO-BG       (make-object color%  20  24  28))   ; gris muy oscuro
+(define RETRO-PANEL    (make-object color%  32  36  44))   ; panel
+(define RETRO-EDGE     (make-object color%   0 255 153))   ; verde neón
+(define RETRO-EDGE-DIM (make-object color%   0 180 120))   ; borde atenuado
+(define RETRO-TEXT     (make-object color% 235 255 245))   ; texto claro
+(define RETRO-TEXT-DIM (make-object color% 180 210 200))   ; texto hover
+(define RETRO-RED      (make-object color% 255  64  64))   ; rojo (opcional)
+
+(define retro-title-font (make-object font% 36 'modern 'normal 'bold))
+(define retro-btn-font   (make-object font% 16 'modern 'normal 'bold))
+
+
+
+;; --- Título en canvas: “BuscaCE” ---
+(define retro-title%
+  (class canvas%
+    (super-new [style '(no-autoclear)]
+               [min-width 520] [min-height 120])
+    (define/override (on-paint)
+      (define dc (send this get-dc))
+      (define w  (send this get-width))
+      (define h  (send this get-height))
+      ;; fondo
+      (send dc set-brush RETRO-BG 'solid)
+      (send dc set-pen   RETRO-BG 1 'transparent)
+      (send dc draw-rectangle 0 0 w h)
+      ;; marco exterior
+      (send dc set-pen RETRO-EDGE 3 'solid)
+      (send dc set-brush RETRO-PANEL 'solid)
+      (send dc draw-rectangle 8 8 (- w 16) (- h 16))
+      ;; texto
+      (send dc set-font retro-title-font)
+      (send dc set-text-foreground RETRO-EDGE)
+      (define title "BuscaCE")
+      (define-values (tw th _1 _2) (send dc get-text-extent title))
+      (define tx (quotient (- w tw) 2))
+      (define ty (quotient (- h th) 2))
+      ;; sombra leve
+      (send dc set-text-foreground RETRO-EDGE-DIM)
+      (send dc draw-text title (+ tx 2) (+ ty 2))
+      (send dc set-text-foreground RETRO-EDGE)
+      (send dc draw-text title tx ty))))
+
+;; --- Botón retro en canvas ---
+(define retro-button%
+  (class canvas%
+    (init-field label on-click)
+    (super-new [style '(no-autoclear)]
+               [min-width  260] [min-height 48]
+               [stretchable-width #f] [stretchable-height #f])
+    (define hover? #f)
+    (define active? #f)
+
+    (define/private (paint!)
+      (define dc (send this get-dc))
+      (define w  (send this get-width))
+      (define h  (send this get-height))
+      ;; fondo
+      (send dc set-brush (if active? RETRO-BG RETRO-PANEL) 'solid)
+      (send dc set-pen   (if hover? RETRO-EDGE RETRO-EDGE-DIM) 3 'solid)
+      (send dc draw-rounded-rectangle 0 0 w h 6)
+      ;; borde interior “pixel”
+      (send dc set-pen (if hover? RETRO-EDGE RETRO-EDGE-DIM) 1 'solid)
+      (send dc draw-rounded-rectangle 3 3 (- w 6) (- h 6) 4)
+      ;; texto
+      (send dc set-font retro-btn-font)
+      (send dc set-text-foreground (if hover? RETRO-TEXT RETRO-TEXT-DIM))
+      (define-values (tw th _1 _2) (send dc get-text-extent label))
+      (define tx (quotient (- w tw) 2))
+      (define ty (quotient (- h th) 2))
+      (send dc draw-text label tx ty))
+
+    (define/override (on-paint) (paint!))
+    (define/override (on-size w h) (send this refresh-now))
+    (define/override (on-event e)
+      (define et (send e get-event-type))
+      (case et
+        [(enter) (set! hover? #t) (send this refresh-now)]
+        [(leave) (set! hover? #f) (set! active? #f) (send this refresh-now)]
+        [(left-down) (set! active? #t) (send this refresh-now)]
+        [(left-up)
+         (when active?
+           (set! active? #f)
+           (send this refresh-now)
+           (when (procedure? on-click) (on-click this e)))]
+        [else (void)])))
+
+  )
+
+;; --- Helper para crear botones con callback sencillo ---
+(define (make-retro-button parent text cb)
+  (new retro-button% [parent parent]
+       [label (format "▶ ~a" text)] ; flecha retro
+       [on-click (lambda (_btn _e) (cb))]))
+
+;; -------- Frame del MENÚ --------
+(define menu-frame (new frame% [label "Buscaminas — Menú"]))
 (define menu-root
   (new vertical-panel% [parent menu-frame]
-       [stretchable-width #t] [stretchable-height #t]
-       [alignment '(center center)]))
+       [alignment '(center center)]
+       [horiz-margin 16] [vert-margin 16]
+       [spacing 12]
+       [stretchable-width #t] [stretchable-height #t]))
 
-(new message% [parent menu-root]
-     [label "Elige dificultad:"] [auto-resize #t])
+;; Fondo del frame (puede que algunas plataformas lo ignoren)
+(with-handlers ([exn:fail? (lambda (_e) (void))])
+  (send menu-frame set-background RETRO-BG))
 
-(define btns (new horizontal-panel% [parent menu-root] [alignment '(center center)]))
+;; Título
+(new retro-title% [parent menu-root])
 
-;; forward-declare para enlazar botones
+;; Contenedor de botones
+(define btns
+  (new vertical-panel% [parent menu-root]
+       [alignment '(center center)]
+       [spacing 10]
+       [stretchable-width #f] [stretchable-height #f]))
+
+;; forward-declare (ya la tienes arriba)
 (define iniciar-juego! #f)
 
-(new button% [parent btns] [label "Fácil (10%)"]
-     [callback (lambda (_1 _2) (iniciar-juego! 'facil))])
+;; Botones de nivel (retro)
+(make-retro-button btns "Fácil"  (lambda () (iniciar-juego! 'facil)))
+(make-retro-button btns "Medio"  (lambda () (iniciar-juego! 'medio)))
+(make-retro-button btns "Difícil" (lambda () (iniciar-juego! 'dificil)))
 
-(new button% [parent btns] [label "Medio (15%)"]
-     [callback (lambda (_1 _2) (iniciar-juego! 'medio))])
+;; (Opcional) botón salir
+;; (make-retro-button btns "Salir" (lambda () (send menu-frame show #f)))
 
-(new button% [parent btns] [label "Difícil (20%)"]
-     [callback (lambda (_1 _2) (iniciar-juego! 'dificil))])
-
+;; Mostrar y centrar el menú
 (send menu-frame show #t)
 (send menu-frame center 'both)
+
 
 ;; =========================================
 ;; VENTANA DEL JUEGO (se crea al iniciar)
