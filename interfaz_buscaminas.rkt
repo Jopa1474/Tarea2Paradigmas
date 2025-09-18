@@ -129,10 +129,34 @@
 
 
 
+;; Colores clásicos de Buscaminas (1..8)
+(define (numero->color n)
+  (cond [(= n 1) (make-object color% "blue")]
+        [(= n 2) (make-object color% "forest green")]
+        [(= n 3) (make-object color% "red")]
+        [(= n 4) (make-object color% "navy")]
+        [(= n 5) (make-object color% "maroon")]
+        [(= n 6) (make-object color% "teal")]
+        [(= n 7) (make-object color% "black")]
+        [(= n 8) (make-object color% "gray35")]
+        [else     (make-object color% "black")]))
 
 
 
 (define (dibujar-tablero dc s canvas)
+  ;; Helper local: color clásico por número (1..8)
+  (define (numero->color n)
+    (case n
+      [(1) (make-object color%   0   0 255)]  ; azul
+      [(2) (make-object color%   0 128   0)]  ; verde
+      [(3) (make-object color% 255   0   0)]  ; rojo
+      [(4) (make-object color%   0   0 128)]  ; azul oscuro
+      [(5) (make-object color% 128   0   0)]  ; marrón/rojo oscuro
+      [(6) (make-object color%   0 128 128)]  ; teal
+      [(7) (make-object color%   0   0   0)]  ; negro
+      [(8) (make-object color% 128 128 128)]  ; gris
+      [else (make-object color% 0 0 0)]))
+
   ;; LIMPIEZA del lienzo (importante si usas 'no-autoclear)
   (define W (send canvas get-width))
   (define H (send canvas get-height))
@@ -146,8 +170,8 @@
   (define der (S-der s))
   (define gan (S-gana s))
 
-  (for ((r (in-range (filas tab))))
-    (for ((c (in-range (cols tab))))
+  (for ([r (in-range (filas tab))])
+    (for ([c (in-range (cols tab))])
       (define-values (x y w h) (rc->rect r c))
       (send dc set-pen "black" 1 'solid)
       (send dc set-brush "light gray" 'solid)
@@ -161,6 +185,7 @@
         (member (list r c) ab
                 (lambda (a b) (and (= (car a) (car b))
                                    (= (cadr a) (cadr b))))))
+
       (define marcado?
         (member (list r c) ba
                 (lambda (a b) (and (= (car a) (car b))
@@ -168,32 +193,32 @@
 
       (cond
         ;; Derrota: solo mostrar bombas que ya "salieron" en la animación
-        ((and der mina? (miembro-coord? (unbox minas-anim) (list r c)))
-         (draw-centered dc "💣" x y w h))
+        [(and der mina? (miembro-coord? (unbox minas-anim) (list r c)))
+         (draw-centered dc "💣" x y w h)]
 
         ;; Celda descubierta y es mina (caso raro fuera de animación)
-        ((and (not der) descubierto? mina?)
-         (draw-centered dc "💣" x y w h))
+        [(and (not der) descubierto? mina?)
+         (draw-centered dc "💣" x y w h)]
 
-        ;; Celda descubierta y no es mina
-        (descubierto?
+        ;; Celda descubierta y NO es mina
+        [descubierto?
          (send dc set-brush "white" 'solid)
          (send dc draw-rectangle (+ x 1) (+ y 1) (- w 2) (- h 2))
          (when (> pista 0)
-           (draw-centered dc (number->string pista) x y w h)))
+           (send dc set-text-foreground (numero->color pista)) ; color clásico
+           (draw-centered dc (number->string pista) x y w h)
+           (send dc set-text-foreground "black"))]            ; restaurar (opcional)
 
         ;; Marcada con bandera
-        (marcado? (draw-centered dc "⚑" x y w h))
+        [marcado?
+         (draw-centered dc "⚑" x y w h)]
 
         ;; En cualquier otro caso no mostrar nada
-        (else (void))))
-
- )
+        [else (void)])))
 
   (when der (overlay dc "💥 BOOM — Perdiste" canvas #f))
-  (when gan (overlay dc "🎉 ¡Ganaste!" canvas #t))
+  (when gan (overlay dc "🎉 ¡Ganaste!" canvas #t)))
 
-)
 
 ;; -----------------------------------------
 ;; Primer click seguro (misma idea)
