@@ -1,49 +1,57 @@
 #lang racket/gui
 (require "logica_buscaminas.rkt")
 
-;; ================================
-;; Parámetros
-;; ================================
+;; =========================================
+;; Parámetros base (puedes ajustar filas/cols)
+;; =========================================
 (define FILAS 8)
 (define COLS  8)
-(define NIVEL 'medio) ; 'facil | 'medio | 'dificil
+
+;; Nivel actual (box para que on-char reinicie con el mismo)
+(define nivel-actual (box 'medio)) ; 'facil | 'medio | 'dificil
 
 ;; estado = (list tablero abiertas banderas derrota? victoria?)
 (define estado
-  (box (list (generar-tablero-nivel FILAS COLS NIVEL) '() '() #f #f)))
+  (box (list (generar-tablero-nivel FILAS COLS (unbox nivel-actual))
+             '() '() #f #f)))
 
-(define (S-tab s) (car s))
-(define (S-abr s) (cadr s))
-(define (S-ban s) (caddr s))
-(define (S-der s) (cadddr s))
+(define (S-tab s)  (car s))
+(define (S-abr s)  (cadr s))
+(define (S-ban s)  (caddr s))
+(define (S-der s)  (cadddr s))
 (define (S-gana s) (car (cddddr s)))
 
 (define (set-estado! nuevo)
   (set-box! estado nuevo)
-  (send canvas refresh-now))
+  (when canvas (send canvas refresh-now)))
 
-;; ================================
-;; Ventana
-;; ================================
+;; =========================================
+;; Ventana y layout con “tarjetas” (menú/juego)
+;; =========================================
 (define cell-size 32)
 (define frame (new frame% [label "Buscaminas (Racket GUI)"]))
-(define _msg  (new message% [parent frame]
-                    [label "Izq: descubrir  |  Der: bandera  |  R: reiniciar"]))
 
-;; ================================
+;; Panel raíz y dos pantallas: menú y juego
+(define root      (new vertical-panel% [parent frame] [stretchable-height #t] [stretchable-width #t]))
+(define menu-pnl  (new vertical-panel% [parent root] [alignment '(center center)] [stretchable-height #t]))
+(define game-pnl  (new vertical-panel% [parent root] [stretchable-height #t]))
+(send game-pnl show #f) ; inicia oculto
+
+;; -----------------------------------------
 ;; Dibujo
-;; ================================
+;; -----------------------------------------
 (define (rc->rect r c)
   (values (* c cell-size) (* r cell-size) cell-size cell-size))
 
 (define (draw-centered dc txt x y w h)
   (define-values (tw th _1 _2) (send dc get-text-extent txt))
-  (send dc draw-text txt (+ x (quotient (- w tw) 2)) (+ y (quotient (- h th) 2))))
+  (send dc draw-text txt (+ x (quotient (- w tw) 2))
+                        (+ y (quotient (- h th) 2))))
 
 (define (overlay dc txt canvas)
   (define w (send canvas get-width))
   (define h (send canvas get-height))
-  (send dc set-brush "light gray" 'solid)
+  (send dc set-brush "light gray" 'solid) ; sin alfa por compatibilidad
   (send dc set-pen "black" 1 'transparent)
   (send dc draw-rectangle 0 0 w h)
   (draw-centered dc txt 0 0 w h))
@@ -62,16 +70,18 @@
       (send dc set-brush "light gray" 'solid)
       (send dc draw-rectangle x y w h)
 
-      (define cel (buscar tab r c))
+      (define cel   (buscar tab r c))
       (define mina? (car cel))
       (define pista (cadr cel))
 
       (define descubierto?
-        (member (list r c) ab (lambda (a b) (and (= (car a) (car b))
-                                                 (= (cadr a) (cadr b))))))
+        (member (list r c) ab
+                (lambda (a b) (and (= (car a) (car b))
+                                   (= (cadr a) (cadr b))))))
       (define marcado?
-        (member (list r c) ba (lambda (a b) (and (= (car a) (car b))
-                                                 (= (cadr a) (cadr b))))))
+        (member (list r c) ba
+                (lambda (a b) (and (= (car a) (car b))
+                                   (= (cadr a) (cadr b))))))
 
       (cond
         ((and descubierto? mina?) (draw-centered dc "💣" x y w h))
@@ -80,16 +90,16 @@
          (send dc draw-rectangle (+ x 1) (+ y 1) (- w 2) (- h 2))
          (when (> pista 0) (draw-centered dc (number->string pista) x y w h)))
         (marcado? (draw-centered dc "⚑" x y w h))
-        (else (void)))))
+        (else (void)))) )
 
   (when der (overlay dc "💥 BOOM — Perdiste" canvas))
-  (when gan (overlay dc "🎉 ¡Ganaste!" canvas)))
+  (when gan (overlay dc "🎉 ¡Ganaste!" canvas))
+)
 
-;; ================================
+
+;; -----------------------------------------
 ;; Canvas personalizado (EVENTOS)
-;; ================================
-(define canvas #f)
-
+;; -----------------------------------------
 (define my-canvas%
   (class canvas%
     (super-new
@@ -125,14 +135,80 @@
     (define/override (on-char e)
       (define k (send e get-key-code))
       (when (equal? k #\r)
-        (set-estado! (list (generar-tablero-nivel FILAS COLS NIVEL) '() '() #f #f))))
+        (set-estado! (list (generar-tablero-nivel FILAS COLS (unbox nivel-actual))
+                           '() '() #f #f))))
     ))
 
-;; Instanciar canvas y mostrar
-(set! canvas (new my-canvas%
-                  [parent frame]
-                  [min-width  (* COLS  cell-size)]
-                  [min-height (* FILAS cell-size)]
-                  [style '(no-autoclear)]))
+;; =========================================
+;; Construcción fija de la pantalla de JUEGO
+;; (barra arriba + canvas abajo, orden estable)
+;; =========================================
+
+;; Barra superior fija
+(define game-bar
+  (new horizontal-panel% [parent game-pnl] [stretchable-height #f]))
+
+(define lbl-msg
+  (new message% [parent game-bar]
+       [label (format "Nivel: ~a   |   Izq: descubrir  |  Der: bandera  |  R: reiniciar"
+                      (symbol->string (unbox nivel-actual)))]))
+
+(new button%  [parent game-bar] [label "Volver al menú"]
+     [callback (lambda (_1 _2) (mostrar-menu!))])
+
+;; Contenedor del canvas (debajo de la barra)
+(define canvas-holder
+  (new vertical-panel% [parent game-pnl] [stretchable-height #t] [stretchable-width #t]))
+
+;; Canvas (una sola vez)
+(define canvas
+  (new my-canvas%
+       [parent canvas-holder]
+       [min-width  (* COLS cell-size)]
+       [min-height (* FILAS cell-size)]
+       [style '(no-autoclear)]))
+
+;; Utilidad: actualizar texto de la barra y enfocar canvas
+(define (actualizar-barra!)
+  (send lbl-msg set-label
+        (format "Nivel: ~a   |   Izq: descubrir  |  Der: bandera  |  R: reiniciar"
+                (symbol->string (unbox nivel-actual))))
+  (send canvas focus))
+
+;; =========================================
+;; Lógica de navegación
+;; =========================================
+(define (mostrar-menu!)
+  (send game-pnl show #f)
+  (send menu-pnl show #t)
+  (send frame reflow-container))
+
+(define (iniciar-juego! nivel)
+  (set-box! nivel-actual nivel)
+  (set-estado! (list (generar-tablero-nivel FILAS COLS nivel) '() '() #f #f))
+  (actualizar-barra!)
+  (send menu-pnl show #f)
+  (send game-pnl show #t)
+  (send frame reflow-container)
+  (send canvas refresh-now)
+  (send canvas focus))
+
+;; =========================================
+;; UI del menú
+;; =========================================
+(new message% [parent menu-pnl]
+     [label "Elige dificultad:"] [auto-resize #t])
+
+(define btns (new horizontal-panel% [parent menu-pnl] [alignment '(center center)]))
+
+(new button% [parent btns] [label "Fácil (10%)"]
+     [callback (lambda (_1 _2) (iniciar-juego! 'facil))])
+
+(new button% [parent btns] [label "Medio (15%)"]
+     [callback (lambda (_1 _2) (iniciar-juego! 'medio))])
+
+(new button% [parent btns] [label "Difícil (20%)"]
+     [callback (lambda (_1 _2) (iniciar-juego! 'dificil))])
+
+;; Mostrar ventana
 (send frame show #t)
-(send canvas focus)
