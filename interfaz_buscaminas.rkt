@@ -1,4 +1,5 @@
 #lang racket/gui
+(require racket/gui/base) ; por queue-callback (si no lo tienes ya)
 (require "logica_buscaminas.rkt")
 
 ;; =========================================
@@ -316,6 +317,11 @@
 (define retro-title-font (make-object font% 36 'modern 'normal 'bold))
 (define retro-btn-font   (make-object font% 16 'modern 'normal 'bold))
 (define retro-message-font   (make-object font% 30 'modern 'normal 'bold))
+(define retro-status-font (make-object font% 13 'modern 'normal 'bold)) 
+(define retro-btn-font-small (make-object font% 13 'modern 'normal 'bold))
+
+
+
 
 ;; --- Título en canvas: “BuscaCE” (igual) ---
 (define retro-title%
@@ -343,13 +349,17 @@
       (send dc set-text-foreground RETRO-EDGE)
       (send dc draw-text title tx ty))))
 
-;; --- Botón retro en canvas (igual) ---
+;; --- Botón retro en canvas (configurable y compacto) ---
 (define retro-button%
   (class canvas%
     (init-field label on-click)
+    (init-field [btn-font   retro-btn-font]
+                [min-width  260]
+                [min-height 48])
     (super-new [style '(no-autoclear)]
-               [min-width  260] [min-height 48]
+               [min-width  min-width] [min-height min-height]
                [stretchable-width #f] [stretchable-height #f])
+
     (define hover? #f)
     (define active? #f)
 
@@ -357,24 +367,26 @@
       (define dc (send this get-dc))
       (define w  (send this get-width))
       (define h  (send this get-height))
+      ;; dibuja un pelín adentro para que no se corte el borde
       (send dc set-brush (if active? RETRO-BG RETRO-PANEL) 'solid)
-      (send dc set-pen   (if hover? RETRO-EDGE RETRO-EDGE-DIM) 3 'solid)
-      (send dc draw-rounded-rectangle 0 0 w h 6)
+      (send dc set-pen   (if hover? RETRO-EDGE RETRO-EDGE-DIM) 2 'solid)
+      (safe-rounded-rect dc 1 1 (- w 2) (- h 2) 5)
       (send dc set-pen (if hover? RETRO-EDGE RETRO-EDGE-DIM) 1 'solid)
-      (send dc draw-rounded-rectangle 3 3 (- w 6) (- h 6) 4)
-      (send dc set-font retro-btn-font)
+      (safe-rounded-rect dc 3 3 (- w 6) (- h 6) 4)
+
+      (send dc set-font btn-font)
       (send dc set-text-foreground (if hover? RETRO-TEXT RETRO-TEXT-DIM))
       (define-values (tw th _1 _2) (send dc get-text-extent label))
-      (define tx (quotient (- w tw) 2))
-      (define ty (quotient (- h th) 2))
+      (define tx (max 4 (quotient (- w tw) 2)))
+      (define ty (max 4 (quotient (- h th) 2)))
       (send dc draw-text label tx ty))
+
     (define/override (on-paint) (paint!))
-    (define/override (on-size w h) (send this refresh-now))
+    (define/override (on-size _w _h) (send this refresh-now))
     (define/override (on-event e)
-      (define et (send e get-event-type))
-      (case et
-        [(enter) (set! hover? #t) (send this refresh-now)]
-        [(leave) (set! hover? #f) (set! active? #f) (send this refresh-now)]
+      (case (send e get-event-type)
+        [(enter)     (set! hover? #t) (send this refresh-now)]
+        [(leave)     (set! hover? #f) (set! active? #f) (send this refresh-now)]
         [(left-down) (set! active? #t) (send this refresh-now)]
         [(left-up)
          (when active?
@@ -383,10 +395,6 @@
            (when (procedure? on-click) (on-click this e)))]
         [else (void)]))))
 
-(define (make-retro-button parent text cb)
-  (new retro-button% [parent parent]
-       [label (format "▶ ~a" text)]
-       [on-click (lambda (_btn _e) (cb))]))
 
 ;; -------- Frame del MENÚ --------
 (define menu-frame (new frame% [label "Buscaminas — Menú"]))
@@ -470,6 +478,28 @@
   (send dlg show #t))
 
 
+;; === Helper para crear botones retro de forma cómoda ===
+;; Úsalo tanto en el MENÚ como en el GAME BAR.
+(define (make-retro-button parent text cb
+                           #:font [font retro-btn-font]
+                           #:min-width [mw 260]
+                           #:min-height [mh 48])
+  (new retro-button%
+       [parent parent]
+       [label (format "▶ ~a" text)]
+       [on-click (lambda (_btn _e) (cb))]
+       [btn-font font]
+       [min-width mw]
+       [min-height mh]))
+
+
+;; Dibujo seguro de rounded-rect: evita anchos/altos negativos y radio inválido
+(define (safe-rounded-rect dc x y w h r)
+  (define W (max 1 (inexact->exact (ceiling w))))
+  (define H (max 1 (inexact->exact (ceiling h))))
+  (define R (max 0 (min (inexact->exact (ceiling r))
+                        (quotient (min W H) 2))))
+  (send dc draw-rounded-rectangle x y W H R))
 
 
 ;; Botón NUEVO
@@ -479,6 +509,124 @@
 (make-retro-button btns "Fácil"  (lambda () (iniciar-juego! 'facil)))
 (make-retro-button btns "Medio"  (lambda () (iniciar-juego! 'medio)))
 (make-retro-button btns "Difícil" (lambda () (iniciar-juego! 'dificil)))
+
+;; --- Barra de estado retro (canvas) ---
+(define (→int x) (inexact->exact (ceiling x))) ; helper por si no lo tienes ya
+
+;; --- Barra de estado retro con AUTO-WRAP ---
+(define retro-status%
+  (class canvas%
+    (init-field [text ""])
+    (init [stretchable-width  #t]
+          [stretchable-height #f]
+          [min-width  420]
+          [min-height 38]) ; ↑ un poco más alta
+
+    (super-new [style '(no-autoclear)]
+               [min-width  min-width]
+               [min-height min-height])
+
+    (send this stretchable-width  stretchable-width)
+    (send this stretchable-height stretchable-height)
+
+    (define status-font retro-status-font)
+    (define line-gap  3)   ; ↑
+    (define side-pad  12)  ; ↑
+    (define vert-pad  6)   ; ↑
+
+    (define/public (set-text! t)
+      (set! text t)
+      (send this refresh-now))
+
+    ;; split por " | "
+    (define (split-items s)
+      (define raw (regexp-split #px"\\s*\\|\\s*" s))
+      (for/list ([i (in-naturals)] [part (in-list raw)])
+        (list part (if (= i (sub1 (length raw))) "" " | "))))
+
+    (define (layout-lines dc w s)
+      (send dc set-font status-font)
+      (define items (split-items s))
+      (define usable-w (max 0 (- w (* 2 side-pad) 8)))
+      (define lines '())
+      (define current '())
+      (define current-w 0)
+      (for ([it items])
+        (define content (first it))
+        (define sep     (second it))
+        (define-values (ctw cth _1 _2) (send dc get-text-extent content))
+        (define-values (stw _a _b _c)  (send dc get-text-extent sep))
+        (define need (+ ctw stw))
+        (cond
+          [(zero? (length current))
+           (set! current (list it))
+           (set! current-w need)]
+          [(<= (+ current-w need) usable-w)
+           (set! current (append current (list it)))
+           (set! current-w (+ current-w need))]
+          [else
+           (set! lines (append lines (list current)))
+           (set! current (list it))
+           (set! current-w need)]))
+      (when (pair? current)
+        (set! lines (append lines (list current))))
+      lines)
+
+    (define/override (on-paint)
+      (define dc (send this get-dc))
+      (define w  (send this get-width))
+      (define h  (send this get-height))
+
+      ;; fondo + panel
+      (send dc set-brush RETRO-BG 'solid)
+      (send dc set-pen   RETRO-BG 1 'transparent)
+      (send dc draw-rectangle 0 0 w h)
+      (send dc set-pen RETRO-EDGE 1 'solid)
+      (send dc set-brush RETRO-PANEL 'solid)
+      (safe-rounded-rect dc 4 4 (- w 8) (- h 8) 4)
+
+      ;; layout
+      (send dc set-font status-font)
+      (define lines (layout-lines dc w text))
+      (define-values (_tw th _1 _2) (send dc get-text-extent "Ag"))
+      (define content-h (+ (* (length lines) th)
+                           (* (max 0 (sub1 (length lines))) line-gap)))
+      (define needed-h  (+ (* 2 vert-pad) content-h))
+      (define minpanel-h (max 34 needed-h)) ; piso un poquito mayor
+
+      (when (> minpanel-h h)
+        (send this min-height (→int minpanel-h))
+        (with-handlers ([exn:fail? (lambda (_e) (void))])
+          (define p (send this get-parent))
+          (when p (send p reflow-container))))
+
+      ;; dibujar texto con sombra
+      (define y0 (+ 4 vert-pad))
+      (for/fold ([y y0]) ([ln lines])
+        (define x (+ 4 side-pad))
+        (for ([it ln])
+          (define content (first it))
+          (define sep     (second it))
+          (send dc set-text-foreground RETRO-TEXT-DIM)
+          (send dc draw-text content (+ x 1) (+ y 1))
+          (send dc set-text-foreground RETRO-TEXT)
+          (send dc draw-text content x y)
+          (define-values (ctw _ _a _b) (send dc get-text-extent content))
+          (set! x (+ x ctw))
+          (when (not (string=? sep ""))
+            (send dc set-text-foreground RETRO-TEXT-DIM)
+            (send dc draw-text sep (+ x 1) (+ y 1))
+            (send dc set-text-foreground RETRO-TEXT)
+            (send dc draw-text sep x y)
+            (define-values (stw _c _d _e) (send dc get-text-extent sep))
+            (set! x (+ x stw))))
+        (+ y th line-gap)))))
+
+
+
+
+
+
 
 ;; Mostrar y centrar el menú
 (send menu-frame show #t)
@@ -491,19 +639,36 @@
 (define game-root  #f)
 (define game-bar   #f)
 (define game-pnl   #f)
-(define lbl-msg    #f)
+(define status-cnv #f)
 (define btn-volver #f)
 
-;; Ajusta la ventana de juego al tamaño del tablero + barra
+;; Igualar la altura del botón con la barra de estado
+(define BUTTON_MIN_H 32)
+
+;; Igualar altura del botón a la altura REAL del status (con piso)
+(define (sincronizar-alturas-barra!)
+  (when (and status-cnv btn-volver game-bar)
+    ;; Espera al próximo ciclo de GUI para que status-cnv ya tenga su altura final
+    (queue-callback
+     (lambda ()
+       (define status-h (send status-cnv get-height)) ; altura actual renderizada
+       (define target-h (max BUTTON_MIN_H status-h))
+       (send btn-volver min-height target-h)
+       ;; (opcional) asegura un ancho cómodo
+       (send btn-volver min-width 190)
+       (send game-bar reflow-container)
+       (send btn-volver refresh-now)))))
+
 (define (ajustar-ventana-a-tablero!)
   (when (and game-frame canvas)
     (define cw (* COLS cell-size))
     (define ch (* FILAS cell-size))
     (send canvas min-width  cw)
     (send canvas min-height ch)
+    ;; Altura de la barra (status + botón)
     (define bh
-      (let-values ([(w1 h1) (send lbl-msg   get-graphical-min-size)]
-                   [(w2 h2) (send btn-volver get-graphical-min-size)])
+      (let-values ([(w1 h1) (send status-cnv get-graphical-min-size)]
+                   [(w2 h2) (send btn-volver  get-graphical-min-size)])
         (max h1 h2)))
     (send game-pnl  min-width  cw)
     (send game-pnl  min-height (+ ch bh))
@@ -517,13 +682,14 @@
       (send game-frame resize (+ cw chrome-w) (+ (+ ch bh) chrome-h)))
     (send canvas focus)))
 
-;; Actualiza el texto de la barra del juego
 (define (actualizar-barra!)
-  (when lbl-msg
-    (send lbl-msg set-label
+  (when status-cnv
+    (send status-cnv set-text!
           (format "Nivel: ~a   |   Izq: descubrir  |  Der: bandera  |  R: reiniciar   |   Tamaño: ~ax~a"
-                  (symbol->string (unbox nivel-actual)) COLS FILAS)))
+                  (symbol->string (unbox nivel-actual)) COLS FILAS))
+    (sincronizar-alturas-barra!))
   (when canvas (send canvas focus)))
+
 
 ;; Volver al menú
 (define (mostrar-menu!)
@@ -538,17 +704,45 @@
   (set! game-root
         (new vertical-panel% [parent game-frame]
              [stretchable-width #t] [stretchable-height #t]
-             [alignment '(left top)]))
-  (set! game-bar (new horizontal-panel% [parent game-root] [stretchable-height #f]))
-  (set! lbl-msg
-        (new message% [parent game-bar]
-             [label (format "Nivel: ~a   |   Izq: descubrir  |  Der: bandera  |  R: reiniciar   |   Tamaño: ~ax~a"
-                            (symbol->string (unbox nivel-actual)) FILAS COLS)]))
+             [alignment '(left top)]
+             [horiz-margin 0] [vert-margin 0] [spacing 0]))
+
+  ;; Barra superior
+  (set! game-bar (new horizontal-panel%
+                      [parent game-root]
+                      [alignment '(left center)]
+                      [spacing 8]
+                      [horiz-margin 8]
+                      [vert-margin 6]
+                      [stretchable-height #f]))
+  (with-handlers ([exn:fail? (lambda (_e) (void))])
+    (send game-bar set-background RETRO-BG))
+
+  ;; Status (wrap + tamaño cómodo)
+  (set! status-cnv
+        (new retro-status%
+             [parent game-bar]
+             [text (format "Nivel: ~a | Izq: descubrir | Der: bandera | R: reiniciar | Tamaño: ~ax~a"
+                           (symbol->string (unbox nivel-actual)) COLS FILAS)]
+             [stretchable-width #t]
+             [min-height 38]))
+
+  ;; Botón “Volver al menú” (más grande para que no se vea raro)
   (set! btn-volver
-        (new button% [parent game-bar] [label "Volver al menú"]
-             [callback (lambda (_1 _2) (mostrar-menu!))]))
+        (make-retro-button game-bar "Volver al menú"
+                           (lambda () (mostrar-menu!))
+                           #:font       retro-btn-font-small
+                           #:min-width  190
+                           #:min-height 36))
+
+  (sincronizar-alturas-barra!)
+
+
+  ;; Panel del canvas de juego
   (set! game-pnl (new vertical-panel% [parent game-root]
-                      [alignment '(left top)] [stretchable-height #t]))
+                      [alignment '(left top)] [stretchable-height #t]
+                      [horiz-margin 8] [vert-margin 0] [spacing 0]))
+
   (set! canvas
         (new my-canvas%
              [parent game-pnl]
@@ -556,6 +750,7 @@
              [min-height (* FILAS cell-size)]
              [stretchable-height #f]
              [style '(no-autoclear)]))
+
   (send game-frame show #t)
   (send game-frame center 'both)
   (send game-frame reflow-container)
