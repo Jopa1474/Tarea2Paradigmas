@@ -71,6 +71,13 @@
   (draw-centered dc txt 0 0 w h))
 
 (define (dibujar-tablero dc s canvas)
+  ;; LIMPIEZA del lienzo (importante si usas 'no-autoclear)
+  (define W (send canvas get-width))
+  (define H (send canvas get-height))
+  (send dc set-brush "white" 'solid)
+  (send dc set-pen "white" 1 'transparent)
+  (send dc draw-rectangle 0 0 W H)
+
   (define tab (S-tab s))
   (define ab  (S-abr s))
   (define ba  (S-ban s))
