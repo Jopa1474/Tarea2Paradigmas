@@ -87,35 +87,65 @@
 ;; -----------------------------------------
 ;; Utilidades de dibujo
 ;; -----------------------------------------
+;; ===== Centrado del tablero =====
+;; Grosor del borde exterior del tablero
+(define BOARD-FRAME 4)
+(define BOARD-PAD 32) ; margen alrededor del tablero dentro del canvas
+
+;; Dimensiones “reales” del tablero (sin padding)
+(define (board-w) (* COLS cell-size))
+(define (board-h) (* FILAS cell-size))
+
+;; Offset para centrar el tablero dentro del canvas actual
+(define (board-offset canvas)
+  (define W (send canvas get-width))
+  (define H (send canvas get-height))
+  (define ox (max BOARD-PAD (quotient (- W (board-w)) 2)))
+  (define oy (max BOARD-PAD (quotient (- H (board-h)) 2)))
+  (values ox oy))
+
+;; Rect de una celda r,c pero tomando en cuenta el offset centrado
 (define (rc->rect r c)
-  (values (* c cell-size) (* r cell-size) cell-size cell-size))
+  (define x0 (* c cell-size))
+  (define y0 (* r cell-size))
+  (values x0 y0 cell-size cell-size))
+
+;; Como rc->rect ahora da coords relativas al tablero (0,0) en la esquina del tablero,
+;; añadimos helpers para convertir a coords de canvas usando el offset:
+(define (rc->rect+offset canvas r c)
+  (define-values (x y w h) (rc->rect r c))
+  (define-values (ox oy) (board-offset canvas))
+  (values (+ ox x) (+ oy y) w h))
 
 (define (draw-centered dc txt x y w h)
   (define-values (tw th _1 _2) (send dc get-text-extent txt))
   (send dc draw-text txt (+ x (quotient (- w tw) 2))
                         (+ y (quotient (- h th) 2))))
 
-(define (overlay dc txt canvas color-ok? )
-  (define w (send canvas get-width))
-  (define h (send canvas get-height))
+(define (overlay dc txt canvas color-ok?)
+  (define W (send canvas get-width))
+  (define H (send canvas get-height))
 
   ;; Guardar estilo actual
-  (define old-font (send dc get-font))
+  (define old-font  (send dc get-font))
   (define old-color (send dc get-text-foreground))
 
   ;; Selección de colores según si ganó o perdió
-  (define main-color (if color-ok? RETRO-EDGE RETRO-RED))
-  (define shadow-color (if color-ok?
-                           RETRO-EDGE-DIM
-                           (make-object color% 150 0 0))) ; sombra oscura roja
+  (define main-color   (if color-ok? RETRO-EDGE RETRO-RED))
+  (define shadow-color (if color-ok? RETRO-EDGE-DIM (make-object color% 150 0 0)))
 
   ;; Fuente retro solo aquí
   (send dc set-font retro-message-font)
 
-  ;; Calcular posición centrada
+  ;; Centro del TABLERO (no del canvas)
+  (define-values (ox oy) (board-offset canvas))
+  (define cx (+ ox (quotient (board-w) 2)))
+  (define cy (+ oy (quotient (board-h) 2)))
+
+  ;; Medidas del texto
   (define-values (tw th _1 _2) (send dc get-text-extent txt))
-  (define tx (quotient (- w tw) 2))
-  (define ty (quotient (- h th) 2))
+  (define tx (- cx (quotient tw 2)))
+  (define ty (- cy (quotient th 2)))
 
   ;; Sombra
   (send dc set-text-foreground shadow-color)
@@ -127,6 +157,10 @@
   ;; Restaurar estilo original
   (send dc set-font old-font)
   (send dc set-text-foreground old-color))
+
+
+
+
 
 
 
@@ -145,20 +179,7 @@
 
 
 (define (dibujar-tablero dc s canvas)
-  ;; Helper local: color clásico por número (1..8)
-  (define (numero->color n)
-    (case n
-      [(1) (make-object color%   0   0 255)]  ; azul
-      [(2) (make-object color%   0 128   0)]  ; verde
-      [(3) (make-object color% 255   0   0)]  ; rojo
-      [(4) (make-object color%   0   0 128)]  ; azul oscuro
-      [(5) (make-object color% 128   0   0)]  ; marrón/rojo oscuro
-      [(6) (make-object color%   0 128 128)]  ; teal
-      [(7) (make-object color%   0   0   0)]  ; negro
-      [(8) (make-object color% 128 128 128)]  ; gris
-      [else (make-object color% 0 0 0)]))
-
-  ;; LIMPIEZA del lienzo (importante si usas 'no-autoclear)
+  ;; Fondo del canvas
   (define W (send canvas get-width))
   (define H (send canvas get-height))
   (send dc set-brush "white" 'solid)
@@ -171,54 +192,73 @@
   (define der (S-der s))
   (define gan (S-gana s))
 
+  ;; Offset del tablero centrado
+  (define-values (ox oy) (board-offset canvas))
+
+  ;; ===== Borde exterior verde (estilo retro) =====
+  (define BOARD-FRAME 4) ; grosor del marco exterior (local a esta función)
+  (define outer-x (- ox BOARD-FRAME))
+  (define outer-y (- oy BOARD-FRAME))
+  (define outer-w (+ (board-w) (* 2 BOARD-FRAME)))
+  (define outer-h (+ (board-h) (* 2 BOARD-FRAME)))
+
+  ;; Trazo principal verde brillante
+  (send dc set-pen RETRO-EDGE BOARD-FRAME 'solid)
+  (send dc set-brush "white" 'transparent)
+  (safe-rounded-rect dc outer-x outer-y outer-w outer-h 6)
+
+  ;; Trazo tenue para efecto "neón"
+  (send dc set-pen RETRO-EDGE-DIM 1 'solid)
+  (safe-rounded-rect dc (+ outer-x 2) (+ outer-y 2)
+                     (- outer-w 4)  (- outer-h 4) 5)
+
+  ;; ===== Fondo del área del tablero (gris claro) =====
+  (send dc set-pen "gray50" 1 'solid)
+  (send dc set-brush "light gray" 'solid)
+  (send dc draw-rectangle ox oy (board-w) (board-h))
+
+  ;; ===== Celdas =====
   (for ([r (in-range (filas tab))])
     (for ([c (in-range (cols tab))])
-      (define-values (x y w h) (rc->rect r c))
+      (define-values (x y w h) (rc->rect+offset canvas r c))
       (send dc set-pen "black" 1 'solid)
       (send dc set-brush "light gray" 'solid)
       (send dc draw-rectangle x y w h)
 
       (define cel   (buscar tab r c))
-      (define mina? (car cel))
+      (define mina? (car  cel))
       (define pista (cadr cel))
 
       (define descubierto?
-        (member (list r c) ab
-                (lambda (a b) (and (= (car a) (car b))
-                                   (= (cadr a) (cadr b))))))
+        (member (list r c) ab (lambda (a b) (and (= (car a) (car b))
+                                                 (= (cadr a) (cadr b))))))
 
       (define marcado?
-        (member (list r c) ba
-                (lambda (a b) (and (= (car a) (car b))
-                                   (= (cadr a) (cadr b))))))
+        (member (list r c) ba (lambda (a b) (and (= (car a) (car b))
+                                                 (= (cadr a) (cadr b))))))
 
       (cond
-        ;; Derrota: solo mostrar bombas que ya "salieron" en la animación
         [(and der mina? (miembro-coord? (unbox minas-anim) (list r c)))
          (draw-centered dc "💣" x y w h)]
 
-        ;; Celda descubierta y es mina (caso raro fuera de animación)
         [(and (not der) descubierto? mina?)
          (draw-centered dc "💣" x y w h)]
 
-        ;; Celda descubierta y NO es mina
         [descubierto?
          (send dc set-brush "white" 'solid)
          (send dc draw-rectangle (+ x 1) (+ y 1) (- w 2) (- h 2))
          (when (> pista 0)
-           (send dc set-text-foreground (numero->color pista)) ; color clásico
+           (send dc set-text-foreground (numero->color pista))
            (draw-centered dc (number->string pista) x y w h)
-           (send dc set-text-foreground "black"))]            ; restaurar (opcional)
+           (send dc set-text-foreground "black"))]
 
-        ;; Marcada con bandera
         [marcado?
          (draw-centered dc "⚑" x y w h)]
-
-        ;; En cualquier otro caso no mostrar nada
         [else (void)])))
 
+  ;; Overlay centrado respecto al tablero (puede salirse si no cabe)
   (when der (overlay dc "💥 BOOM — Perdiste" canvas #f))
-  (when gan (overlay dc "🎉 ¡Ganaste!" canvas #t)))
+  (when gan (overlay dc "🎉 ¡Ganaste!"       canvas #t)))
 
 
 ;; -----------------------------------------
@@ -245,7 +285,7 @@
 
     ;; Mouse
     (define/override (on-event e)
-      (define et (send e get-event-type)) ; 'left-down, 'right-down, ...
+      (define et (send e get-event-type))
       (when (or (eq? et 'left-down) (eq? et 'right-down))
         (define s      (unbox estado))
         (define tab    (S-tab s))
@@ -257,24 +297,30 @@
         (unless (or der gan)
           (define x (send e get-x))
           (define y (send e get-y))
-          (define r (quotient y cell-size))
-          (define c (quotient x cell-size))
-          (when (en-rango? tab r c)
-            (if (eq? et 'right-down)
-                ;; bandera
-                (set-estado! (list tab ab (alternar-bandera ba r c) #f (gano? tab ab) first?))
-                ;; click izquierdo
-                (if first?
-                    (let* ((nivel (unbox nivel-actual))
-                           (t2    (generar-tablero-seguro (filas tab) (cols tab) nivel r c)))
-                      (let-values (((ab2 boom) (revelar t2 '() r c))) ; flood desde vacío
-                        (set-estado! (list t2 ab2 ba #f (gano? t2 ab2) #f))))
-                    (let-values (((ab2 boom) (revelar tab ab r c)))
-                      (define win2 (and (not boom) (gano? tab ab2)))
-                      (set-estado! (list tab ab2 ba boom win2 first?))
-                      ;; >>> NUEVO: dispara la animación si explotó
-                      (when boom
-                        (start-loss-animation! tab (list r c))))))))))
+          (define-values (ox oy) (board-offset this))
+          (define bx (- x ox))
+          (define by (- y oy))
+          (cond
+            ;; Clic fuera del tablero: ignorar
+            [(or (< bx 0) (< by 0)
+                 (>= bx (board-w)) (>= by (board-h)))
+             (void)]
+            [else
+             (define r (quotient by cell-size))
+             (define c (quotient bx cell-size))
+             (when (en-rango? tab r c)
+               (if (eq? et 'right-down)
+                   (set-estado! (list tab ab (alternar-bandera ba r c) #f (gano? tab ab) first?))
+                   (if first?
+                       (let* ((nivel (unbox nivel-actual))
+                              (t2    (generar-tablero-seguro (filas tab) (cols tab) nivel r c)))
+                         (let-values (((ab2 boom) (revelar t2 '() r c)))
+                           (set-estado! (list t2 ab2 ba #f (gano? t2 ab2) #f))))
+                       (let-values (((ab2 boom) (revelar tab ab r c)))
+                         (define win2 (and (not boom) (gano? tab ab2)))
+                         (set-estado! (list tab ab2 ba boom win2 first?))
+                         (when boom (start-loss-animation! tab (list r c)))))))]))))
+
 
     ;; Teclado
     (define/override (on-char e)
@@ -661,20 +707,23 @@
 
 (define (ajustar-ventana-a-tablero!)
   (when (and game-frame canvas)
-    (define cw (* COLS cell-size))
-    (define ch (* FILAS cell-size))
-    (send canvas min-width  cw)
-    (send canvas min-height ch)
+    (define cw (+ (board-w) (* 2 BOARD-PAD)))
+    (define ch (+ (board-h) (* 2 BOARD-PAD)))
+    (send canvas  min-width  cw)
+    (send canvas  min-height ch)
+
     ;; Altura de la barra (status + botón)
     (define bh
       (let-values ([(w1 h1) (send status-cnv get-graphical-min-size)]
                    [(w2 h2) (send btn-volver  get-graphical-min-size)])
         (max h1 h2)))
+
     (send game-pnl  min-width  cw)
     (send game-pnl  min-height (+ ch bh))
     (send game-root min-width  cw)
     (send game-root min-height (+ ch bh))
     (send game-frame reflow-container)
+
     (let-values ([(fw fh)   (send game-frame get-size)]
                  [(fcw fch) (send game-frame get-client-size)])
       (define chrome-w (- fw fcw))
@@ -744,12 +793,13 @@
                       [horiz-margin 8] [vert-margin 0] [spacing 0]))
 
   (set! canvas
-        (new my-canvas%
-             [parent game-pnl]
-             [min-width  (* COLS cell-size)]
-             [min-height (* FILAS cell-size)]
-             [stretchable-height #f]
-             [style '(no-autoclear)]))
+      (new my-canvas%
+           [parent game-pnl]
+           [min-width  (+ (board-w) (* 2 BOARD-PAD))]
+           [min-height (+ (board-h) (* 2 BOARD-PAD))]
+           [stretchable-height #f]
+           [style '(no-autoclear)]))
+
 
   (send game-frame show #t)
   (send game-frame center 'both)
