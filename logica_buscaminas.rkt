@@ -1,167 +1,215 @@
 #lang racket
-
-;;////////////////////////////
-;;Creacion del tablero
-;;///////////////////////////
-
-;; Generar tablero vacío
-
-(define (crear_columna m)
-  (if (zero? m)
-      '()
-      (cons '(#f 0 #f #f) (crear_columna (sub1 m))))) ;  ;; sin mina, 0 minas vecinas, no descubierto, no marcado
-
-(define (crear_fila n m)
-  (if (zero? n)
-      '()
-      (cons (crear_columna m) (crear_fila (sub1 n) m)))) ; n filas de columnas m
-
-(define (crear_tablero n m)
-  (crear_fila n m))
- 
-;;Para poder colocar las minas de manera aleatoria
 (require racket/random)
 
-;;Colocamos las minas de forma aleatoria en el tablero
-(define (colocar_minas tablero prob)
-  (for/list ([fila tablero])
-    (for/list ([celda fila])
-      (if (< (random) prob)
-          (list #t 0 #f #f) ;; mina
-          celda))))
+;; =========================================================
+;; Representación de celda: '(mina? pista descubierto? marcado?)
+;; mina?       : #t | #f
+;; pista       : entero 0..8 (número de minas vecinas)
+;; descubierto?: #t | #f
+;; marcado?    : #t | #f
+;; =========================================================
 
-;;Inicializacion
-(define filas 8)
-(define columnas 8)
+(provide
+  ;; construcción
+  crear-tablero            ; (n m) -> matriz de celdas vacías
+  colocar-minas            ; (tablero prob) -> tablero con minas (prob ~ 0.10/0.15/0.20)
+  tablerizar-con-pistas    ; (tablero) -> tablero con 'pista' llenas
+  generar-tablero-nivel    ; (n m nivel) -> tablero final con minas+pistas
 
+  ;; helpers
+  filas cols
+  en-rango? buscar actualizar-celda
+  vecinos num-minas-alrededor
 
-(define tablero (colocar_minas(crear_tablero filas columnas)0.15))
+  ;; juego
+  revelar                  ; (tablero abiertas r c) -> (values nuevas-abiertas explotó?)
+  flood-reveal
+  alternar-bandera         ; (banderas r c) -> nuevas-banderas
+  gano?                    ; (tablero abiertas) -> #t/#f
+)
 
-;; busqueda por posicion en la matriz
-(define (buscar matriz fila col)
-  (list-ref (list-ref matriz fila) col))
+;; --------------------------
+;; Construcción base
+;; --------------------------
+(define (crear-columna m)
+  (if (zero? m)
+      '()
+      (cons '(#f 0 #f #f) (crear-columna (sub1 m)))))
 
-;;Para agregar las pistas a una matriz nueva
-
-;;Cambiar pista
-
-
-
-;;Para ver si las casillas alrededor tienen minas
-
-
-
-;;casilla N (arriba)
-
-(define (N n m)
-  (cond((zero? n) '())
-  (else(buscar tablero (- n 1) m))))
-
-;;casilla O (derecha)
-
-(define (O n m columnas)
-  (cond((= m columnas) '())
-  (else(buscar tablero n (+ m 1)))))
-
-;;casilla S (abajo)
-
-(define (S n m filas)
-  (cond((= n filas) '())
-  (else(buscar tablero (+ n 1) m))))
-
-;;casilla E (izquierda)
-
-(define (E n m)
-  (cond((zero? m) '())
-  (else(buscar tablero n (- m 1)))))
-
-;;casilla NO (arriba a la derecha)
-
-(define (NO n m filas columnas)
-  (cond((zero? n) '())
-  ((= m columnas) '())
-  (else(buscar tablero (- n 1) (+ m 1)))))
-
-;;casilla SO (abajo a la derecha)
-
-(define (SO n m filas columnas)
-  (cond((= n filas) '())
-  ((= m columnas) '())
-  (else(buscar tablero (+ n 1) (+ m 1)))))
-
-;;casilla SE (abajo a la izquierda)
-
-(define (SE n m filas columnas)
-  (cond((= n filas) '())
-  ((zero? m) '())
-  (else(buscar tablero (+ n 1) (- m 1)))))
-
-;;casilla NE (arriba a la izquierda)
-
-(define (NE n m filas columnas)
-  (cond((zero? n) '())
-  ((zero? m) '())
-  (else(buscar tablero (- n 1) (- m 1)))))
-
-;;Para verificar si la casilla tiene una mina
-(define(tiene_mina casilla)
-  (cond((null? casilla) #f)
-  (else(equal? (car casilla) #t))))
-
-;;Casillas alrededor de la actual
-
-(define (alrededor n m filas columnas)
-  (list (N n m)
-        (O n m columnas)
-        (S n m filas)
-        (E n m)
-        (NO n m filas columnas)
-        (SO n m filas columnas)
-        (SE n m filas columnas)
-        (NE n m filas columnas)))
-
-;;Para obtener el numero de minas que hay alrededor
-(define(num_minas_alrededor n m filas columnas)
-  (num_minas_alrededor_aux n m filas columnas (alrededor n m filas columnas)))
-
-(define (num_minas_alrededor_aux n m filas columnas lista_alrededor)
-  (cond((null? lista_alrededor) 0)
-    ((equal? (tiene_mina (car lista_alrededor)) #t) (+ 1 (num_minas_alrededor_aux n m filas columnas (cdr lista_alrededor))))
-       (else(+ 0 (num_minas_alrededor_aux n m filas columnas (cdr lista_alrededor))))))
-
-;;Para cambiar el valor de la pista de una casilla
-
-(define (pista tablero n m filas columnas)
-  (cons (car(buscar tablero n m))(cons (num_minas_alrededor n m filas columnas) (cdr(cdr(buscar tablero n m))))))
-
-
-;;Creamos el tablero con las pistas ya incluidas
-
-;;(define (crear_columna_p tablero n m fil col)
-;;  (if (zero? m)
-;;      '()
-;;      (cons (pista tablero (- n 1) (- m 1) (- fil 1) (- col 1)) (crear_columna_p tablero n (sub1 m) fil col)))) ;  ;; sin mina, 0 minas vecinas, no descubierto, no marcado
-
-(define (crear_columna_p tablero n m fil col)
-  (cond((zero? m) '())
-       ((equal? (tiene_mina(buscar tablero (- n 1)(- m 1))) #t) (cons '(#t X #f #f) (crear_columna_p tablero n (sub1 m) fil col)))
-       (else(cons (pista tablero (- n 1) (- m 1) (- fil 1) (- col 1)) (crear_columna_p tablero n (sub1 m) fil col)))
-       ))
-
-
-;;(define (crear_columna_p tablero n m fil col)
-;;  (cond((zero? m)'())
-;;   ((equal? (tiene_mina(buscar tablero (- n 1) (- m 1))) #t) (cons '(#t X #f #f) (crear_columna_p tablero n (sub1 m) fil col))
-;;      (else(cons (pista tablero (- n 1) (- m 1) (- fil 1) (- col 1)) (crear_columna_p tablero n (sub1 m) fil col)))))) ;  ;; sin mina, 0 minas vecinas, no descubierto, no marcado
-
-(define (crear_fila_p tablero n m fil col)
+(define (crear-fila n m)
   (if (zero? n)
       '()
-      (cons (crear_columna_p tablero n m fil col) (crear_fila_p tablero (sub1 n) m fil col)))) ; n filas de columnas m
+      (cons (crear-columna m) (crear-fila (sub1 n) m))))
 
-(define (crear_tablero_pistas tablero n m fil col)
-  (crear_fila_p tablero n m fil col))
- 
+(define (crear-tablero n m)
+  (crear-fila n m))
 
-(define tablero_full (crear_tablero_pistas tablero filas columnas filas columnas))
+;; --------------------------
+;; Utilidades de matriz
+;; --------------------------
+(define (filas tablero) (length tablero))
+(define (cols tablero) (if (null? tablero) 0 (length (car tablero))))
 
+(define (en-rango? tablero r c)
+  (and (<= 0 r) (< r (filas tablero)) (<= 0 c) (< c (cols tablero))))
+
+(define (buscar tablero r c)
+  (list-ref (list-ref tablero r) c))
+
+;; Actualiza una celda reconstruyendo de forma inmutable
+(define (actualizar-celda tablero r c nueva-celda)
+  (let loop-f ((i 0) (filas-tablero tablero) (acc '()))
+    (cond
+      ((null? filas-tablero) (reverse acc))
+      (else
+       (define fila (car filas-tablero))
+       (define fila-nueva
+         (if (= i r)
+             (let loop-c ((j 0) (cols-tab fila) (acc2 '()))
+               (cond
+                 ((null? cols-tab) (reverse acc2))
+                 (else
+                  (define cel (car cols-tab))
+                  (loop-c (add1 j) (cdr cols-tab)
+                          (cons (if (= j c) nueva-celda cel) acc2)))))
+             fila))
+       (loop-f (add1 i) (cdr filas-tablero) (cons fila-nueva acc))))))
+
+;; --------------------------
+;; Colocar minas aleatoriamente (por probabilidad 0..1)
+;; --------------------------
+(define (colocar-minas tablero prob)
+  (map (lambda (fila)
+         (map (lambda (celda)
+                (if (< (random) prob)
+                    '(#t 0 #f #f)
+                    celda))
+              fila))
+       tablero))
+
+;; --------------------------
+;; Vecindad y conteos
+;; --------------------------
+(define offsets
+  '((-1  0) ( 1  0) ( 0 -1) ( 0  1)
+    (-1 -1) (-1  1) ( 1 -1) ( 1  1)))
+
+(define (vecinos tablero r c)
+  (let loop ((ofs offsets) (acc '()))
+    (if (null? ofs)
+        (reverse acc)
+        (let* ((dr (caar ofs)) (dc (cadar ofs))
+               (nr (+ r dr))  (nc (+ c dc)))
+          (loop (cdr ofs)
+                (if (en-rango? tablero nr nc)
+                    (cons (list nr nc) acc)
+                    acc))))))
+
+(define (tiene-mina? tablero r c)
+  (car (buscar tablero r c))) ; mina? es el car de la celda
+
+(define (num-minas-alrededor tablero r c)
+  (let loop ((vecs (vecinos tablero r c)) (acc 0))
+    (if (null? vecs) acc
+        (let* ((p (car vecs)) (rr (car p)) (cc (cadr p))
+               (inc (if (tiene-mina? tablero rr cc) 1 0)))
+          (loop (cdr vecs) (+ acc inc))))))
+
+;; --------------------------
+;; Cargar 'pista' (número) en todas las celdas no-mine
+;; --------------------------
+(define (tablerizar-con-pistas tablero)
+  (let loop-f ((r 0) (tab tablero))
+    (if (= r (filas tablero))
+        tab
+        (let loop-c ((c 0) (tab2 tab))
+          (if (= c (cols tablero))
+              (loop-f (add1 r) tab2)
+              (let* ((cel (buscar tab2 r c))
+                     (mina? (car cel))
+                     (pista (if mina? 0 (num-minas-alrededor tab2 r c)))
+                     (desc (caddr cel))
+                     (mark (cadddr cel))
+                     (nuevo (list mina? pista desc mark)))
+                (loop-c (add1 c) (actualizar-celda tab2 r c nuevo))))))))
+
+;; --------------------------
+;; Crear tablero por nivel
+;; nivel: 'facil (0.10) | 'medio (0.15) | 'dificil (0.20)
+;; --------------------------
+(define (nivel->prob nivel)
+  (cond ((eq? nivel 'facil)   0.10)
+        ((eq? nivel 'medio)   0.15)
+        (else                 0.20)))
+
+(define (generar-tablero-nivel n m nivel)
+  (tablerizar-con-pistas (colocar-minas (crear-tablero n m) (nivel->prob nivel))))
+
+;; --------------------------
+;; Conjuntos simples de coordenadas (listas sin repeticiones)
+;; --------------------------
+(define (ig-coord? a b) (and (= (car a) (car b)) (= (cadr a) (cadr b))))
+(define (en-set? p s)
+  (and (not (null? s))
+       (or (ig-coord? p (car s)) (en-set? p (cdr s)))))
+(define (add-set p s) (if (en-set? p s) s (cons p s)))
+(define (del-set p s)
+  (cond ((null? s) '())
+        ((ig-coord? p (car s)) (cdr s))
+        (else (cons (car s) (del-set p (cdr s))))))
+
+;; --------------------------
+;; Flood reveal (descubrir zonas de 0 y su frontera)
+;; Retorna nuevo conjunto de "abiertas"
+;; --------------------------
+(define (flood-reveal tablero abiertas r c)
+  (if (en-set? (list r c) abiertas)
+      abiertas
+      (let* ((cel (buscar tablero r c))
+             (mina? (car cel))
+             (pista (cadr cel)))
+        (if mina?
+            abiertas
+            (let ((ab1 (add-set (list r c) abiertas)))
+              (if (> pista 0)
+                  ab1
+                  (let loop ((vecs (vecinos tablero r c)) (acc ab1))
+                    (if (null? vecs) acc
+                        (let* ((p (car vecs)) (rr (car p)) (cc (cadr p)))
+                          (loop (cdr vecs) (flood-reveal tablero acc rr cc)))))))))))
+
+;; --------------------------
+;; Revelar una celda (click izquierdo)
+;; Devuelve (values nuevas-abiertas explotó?)
+;; --------------------------
+(define (revelar tablero abiertas r c)
+  (let* ((cel (buscar tablero r c))
+         (mina? (car cel)))
+    (if mina?
+        (values abiertas #t)
+        (values (flood-reveal tablero abiertas r c) #f))))
+
+;; --------------------------
+;; Alternar bandera (click derecho)
+;; --------------------------
+(define (alternar-bandera banderas r c)
+  (let ((p (list r c)))
+    (if (en-set? p banderas) (del-set p banderas) (add-set p banderas))))
+
+;; --------------------------
+;; ¿Ganó? = todas las celdas sin mina están en 'abiertas'
+;; --------------------------
+(define (gano? tablero abiertas)
+  (let loop-f ((r 0))
+    (cond
+      ((= r (filas tablero)) #t)
+      (else
+       (let loop-c ((c 0))
+         (cond
+           ((= c (cols tablero)) (loop-f (add1 r)))
+           (else
+            (define cel (buscar tablero r c))
+            (define es-mina (car cel))
+            (if (or es-mina (en-set? (list r c) abiertas))
+                (loop-c (add1 c))
+                #f))))))))
