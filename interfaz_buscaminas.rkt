@@ -38,6 +38,51 @@
   (set-box! estado nuevo)
   (when canvas (send canvas refresh-now)))
 
+
+;; ==========================
+;; Animación de derrota
+;; ==========================
+(define minas-anim (box '())) ; lista de (list r c) ya reveladas visualmente
+(define timer-anim #f)        ; timer de la animación o #f si no corre
+
+(define (coord=? a b)
+  (and (= (car a) (car b)) (= (cadr a) (cadr b))))
+
+(define (miembro-coord? lst rc)
+  (member rc (unbox minas-anim) coord=?))
+
+;; Devuelve todas las minas del tablero, poniendo primero la del clic si se pasa
+(define (todas-las-minas tab [click-rc #f])
+  (define L
+    (for*/list ([r (in-range (filas tab))]
+                [c (in-range (cols tab))]
+                #:when (car (buscar tab r c))) ; (car cel) = ¿mina?
+      (list r c)))
+  (if click-rc
+      (append (list click-rc) (remove* (list click-rc) L coord=?))
+      L))
+
+;; Inicia la animación: revela minas de una en una
+(define (start-loss-animation! tab [click-rc #f])
+  ;; detener animación previa si existía
+  (when timer-anim (send timer-anim stop) (set! timer-anim #f))
+  (set-box! minas-anim '())
+  (define cola (todas-las-minas tab click-rc)) ; cola mutable en el closure
+  (set! timer-anim
+        (new timer%
+             [interval 60] ; ms por mina (ajústalo a gusto)
+             [notify-callback
+              (lambda ()
+                (cond
+                  [(null? cola)
+                   (send timer-anim stop)
+                   (set! timer-anim #f)]
+                  [else
+                   (set-box! minas-anim (cons (car cola) (unbox minas-anim)))
+                   (set! cola (cdr cola))
+                   (when canvas (send canvas refresh-now))]))])))
+
+
 ;; -----------------------------------------
 ;; Utilidades de dibujo
 ;; -----------------------------------------
@@ -122,13 +167,15 @@
                                    (= (cadr a) (cadr b))))))
 
       (cond
-        ;; Si se perdió el juego y hay una mina en esta celda → mostrar bomba
-        ((and der mina?) (draw-centered dc "💣" x y w h))
+        ;; Derrota: solo mostrar bombas que ya "salieron" en la animación
+        ((and der mina? (miembro-coord? (unbox minas-anim) (list r c)))
+         (draw-centered dc "💣" x y w h))
 
-        ;; Celda descubierta y es mina (primer clic inseguro o bug) → bomba
-        ((and descubierto? mina?) (draw-centered dc "💣" x y w h))
+        ;; Celda descubierta y es mina (caso raro fuera de animación)
+        ((and (not der) descubierto? mina?)
+         (draw-centered dc "💣" x y w h))
 
-        ;; Celda descubierta y no es mina → mostrar número o vacío
+        ;; Celda descubierta y no es mina
         (descubierto?
          (send dc set-brush "white" 'solid)
          (send dc draw-rectangle (+ x 1) (+ y 1) (- w 2) (- h 2))
@@ -140,6 +187,7 @@
 
         ;; En cualquier otro caso no mostrar nada
         (else (void))))
+
  )
 
   (when der (overlay dc "💥 BOOM — Perdiste" canvas #f))
@@ -197,15 +245,22 @@
                         (set-estado! (list t2 ab2 ba #f (gano? t2 ab2) #f))))
                     (let-values (((ab2 boom) (revelar tab ab r c)))
                       (define win2 (and (not boom) (gano? tab ab2)))
-                      (set-estado! (list tab ab2 ba boom win2 first?)))))))))
+                      (set-estado! (list tab ab2 ba boom win2 first?))
+                      ;; >>> NUEVO: dispara la animación si explotó
+                      (when boom
+                        (start-loss-animation! tab (list r c))))))))))
 
     ;; Teclado
     (define/override (on-char e)
       (define k (send e get-key-code))
       (when (equal? k #\r)
+        ;; >>> NUEVO: detener/limpiar animación antes de reiniciar
+        (when timer-anim (send timer-anim stop) (set! timer-anim #f))
+        (set-box! minas-anim '())
         (set-estado! (list (generar-tablero-nivel FILAS COLS (unbox nivel-actual))
-                           '() '() #f #f #t)))))
-) 
+                           '() '() #f #f #t))))
+  ))
+
 
 
 ;; =========================================
@@ -492,6 +547,8 @@
         ;; Si NO hay tamaño personalizado, usa el tamaño por defecto del nivel
         (when (not (unbox dims-personalizadas?))
           (aplicar-dims-por-nivel! nivel))
+        (when timer-anim (send timer-anim stop) (set! timer-anim #f))
+        (set-box! minas-anim '())
         ;; Reinicia estado con first? = #t (primer click seguro)
         (set-estado! (list (generar-tablero-nivel FILAS COLS nivel) '() '() #f #f #t))
         ;; Crear ventana de juego
