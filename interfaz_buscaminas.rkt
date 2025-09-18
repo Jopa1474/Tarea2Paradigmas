@@ -163,7 +163,7 @@
       (when (equal? k #\r)
         (set-estado! (list (generar-tablero-nivel FILAS COLS (unbox nivel-actual))
                            '() '() #f #f #t)))))
-) ; <-- cierra (define my-canvas%)
+) 
 
 
 ;; =========================================
@@ -305,7 +305,7 @@
     (new text-field%
          (parent row-pnl)
          (label "")
-         (init-value (number->string FILAS))
+         (init-value (number->string COLS))
          (min-width 60)))
 
   (new message% (parent row-pnl) (label "Cols:"))
@@ -313,7 +313,7 @@
     (new text-field%
          (parent row-pnl)
          (label "")
-         (init-value (number->string COLS))
+         (init-value (number->string FILAS))
          (min-width 60)))
 
   (define btns-pnl (new horizontal-panel% (parent pnl) (spacing 8)))
@@ -337,7 +337,7 @@
              (send dlg show #f)
              (message-box "Listo"
                           (format "Tamaño establecido: ~a×~a.\nElige un nivel para empezar."
-                                  FILAS COLS)
+                                  COLS FILAS)
                           menu-frame))))))
 
   ;; Botón Cancelar
