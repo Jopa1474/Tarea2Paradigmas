@@ -169,11 +169,9 @@
 ;; =========================================
 ;; Tamaños por nivel (por defecto; se ignoran si el usuario personaliza)
 ;; =========================================
-(define (dims-por-nivel nivel)
-  (cond [(eq? nivel 'facil)   (values 8  8)]
-        [(eq? nivel 'medio)   (values 12 12)]
-        [(eq? nivel 'dificil) (values 16 16)]
-        [else                 (values 12 12)]))
+;; Ahora: siempre 8x8 para cualquier nivel
+(define (dims-por-nivel _nivel)
+  (values 8 8))
 
 (define (aplicar-dims-por-nivel! nivel)
   (define-values (f c) (dims-por-nivel nivel))
