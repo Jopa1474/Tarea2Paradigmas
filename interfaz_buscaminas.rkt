@@ -205,6 +205,7 @@
      [callback (lambda (_1 _2) (iniciar-juego! 'dificil))])
 
 (send menu-frame show #t)
+(send menu-frame center 'both)
 
 ;; =========================================
 ;; VENTANA DEL JUEGO (se crea al iniciar)
@@ -263,6 +264,7 @@
 (define (mostrar-menu!)
   (when game-frame (send game-frame show #f))
   (send menu-frame show #t)
+  (send menu-frame center 'both)
   (send menu-frame reflow-container))
 
 ;; Crea el frame del juego, su barra y su canvas PROPIOS (separados del menú)
@@ -298,6 +300,7 @@
              [style '(no-autoclear)]))
 
   (send game-frame show #t)
+  (send game-frame center 'both)
   (send game-frame reflow-container)
   (ajustar-ventana-a-tablero!)
   (send canvas refresh-now)
